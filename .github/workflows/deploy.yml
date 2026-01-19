@@ -21,11 +21,9 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: maps-reviewer-desktop/package-lock.json
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # Dependências do Linux para Tauri (WebKit/GTK)
       - name: Install Linux deps
         if: runner.os == 'Linux'
         run: |
