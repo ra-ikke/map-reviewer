@@ -36,11 +36,9 @@ jobs:
             patchelf
 
       - name: Install JS deps
-        working-directory: maps-reviewer-desktop
         run: npm ci
 
       - name: Build installers
-        working-directory: maps-reviewer-desktop
         run: npx tauri build
 
       - name: Upload bundles
@@ -48,4 +46,4 @@ jobs:
         with:
           name: bundles-${{ runner.os }}
           path: |
-            maps-reviewer-desktop/src-tauri/target/release/bundle/**
+            src-tauri/target/release/bundle/**
