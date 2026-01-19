@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { getVersion } from '@tauri-apps/api/app'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { check } from '@tauri-apps/plugin-updater'
@@ -251,4 +252,8 @@ export async function downloadAndInstallUpdate(update: UpdateAvailable, onEvent?
 
 export async function relaunchApp(): Promise<void> {
   await relaunch()
+}
+
+export async function getAppVersion(): Promise<string> {
+  return await getVersion()
 }

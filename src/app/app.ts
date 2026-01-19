@@ -23,6 +23,7 @@ import {
   checkForUpdate,
   downloadAndInstallUpdate,
   relaunchApp,
+  getAppVersion,
   readClipboardText,
   readTextFileFromPath,
   registerHotkeys,
@@ -114,7 +115,7 @@ export function initApp(root: HTMLElement): void {
       <header class="header">
         <div class="title">
           <div class="h1">Maps Reviewer</div>
-          <div class="sub">v${APP_VERSION}</div>
+          <div class="sub">v<span id="appVersion">${APP_VERSION}</span></div>
         </div>
         <div class="actions">
           <button id="homeBtn" class="btn" style="display:none">Home</button>
@@ -213,6 +214,7 @@ export function initApp(root: HTMLElement): void {
 
   const els = {
     appShell: root.querySelector<HTMLDivElement>('#appShell')!,
+    appVersion: root.querySelector<HTMLSpanElement>('#appVersion')!,
     commandMode: root.querySelector<HTMLSelectElement>('#commandMode')!,
     dedupe: root.querySelector<HTMLInputElement>('#dedupe')!,
     pasteInput: root.querySelector<HTMLTextAreaElement>('#pasteInput')!,
@@ -244,6 +246,15 @@ export function initApp(root: HTMLElement): void {
     authOverlay: root.querySelector<HTMLDivElement>('#authOverlay')!,
     confirmMassPermLeave: root.querySelector<HTMLDivElement>('#confirmMassPermLeave')!,
     settings: root.querySelector<HTMLDivElement>('.settings')!,
+  }
+
+  async function hydrateAppVersion(): Promise<void> {
+    try {
+      const v = await getAppVersion()
+      if (v && els.appVersion) els.appVersion.textContent = v
+    } catch {
+      // fallback to static APP_VERSION when not running in Tauri
+    }
   }
 
   function setStatus(msg: string): void {
@@ -2437,6 +2448,7 @@ export function initApp(root: HTMLElement): void {
   // inicialização (autenticação antes de mostrar o Home)
   setShellVisible(false)
   renderAuth()
+  void hydrateAppVersion()
 
   // hotkeys globais (best effort)
   void registerHotkeys().catch(() => {
