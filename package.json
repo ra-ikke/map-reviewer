@@ -11,7 +11,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "node scripts/sync-app-version.mjs && tsc && vite build",
     "preview": "vite preview"
   },
   "devDependencies": {

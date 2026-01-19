@@ -89,6 +89,7 @@ export function initApp(root: HTMLElement): void {
   let authStatusMsg = ''
   let authAutoTried = false
   let updaterAutoTried = false
+  let runtimeVersion = APP_VERSION
 
   // Mass perm (local UI state)
   let massPermMapcodes: string[] = []
@@ -115,7 +116,9 @@ export function initApp(root: HTMLElement): void {
       <header class="header">
         <div class="title">
           <div class="h1">Maps Reviewer</div>
-          <div class="sub">v<span id="appVersion">${APP_VERSION}</span></div>
+          <button id="aboutBtn" class="sub linkBtn" type="button">
+            v<span id="appVersion">${APP_VERSION}</span>
+          </button>
         </div>
         <div class="actions">
           <button id="homeBtn" class="btn" style="display:none">Home</button>
@@ -210,10 +213,12 @@ export function initApp(root: HTMLElement): void {
     <div id="updateModal" class="wizardOverlay" style="display:none"></div>
     <div id="authOverlay" class="wizardOverlay" style="display:none"></div>
     <div id="confirmMassPermLeave" class="wizardOverlay" style="display:none"></div>
+    <div id="aboutModal" class="wizardOverlay" style="display:none"></div>
   `
 
   const els = {
     appShell: root.querySelector<HTMLDivElement>('#appShell')!,
+    aboutBtn: root.querySelector<HTMLButtonElement>('#aboutBtn')!,
     appVersion: root.querySelector<HTMLSpanElement>('#appVersion')!,
     commandMode: root.querySelector<HTMLSelectElement>('#commandMode')!,
     dedupe: root.querySelector<HTMLInputElement>('#dedupe')!,
@@ -242,7 +247,8 @@ export function initApp(root: HTMLElement): void {
     confirmLeave: root.querySelector<HTMLDivElement>('#confirmLeave')!,
     confirmFinishReview: root.querySelector<HTMLDivElement>('#confirmFinishReview')!,
     submitReviewResult: root.querySelector<HTMLDivElement>('#submitReviewResult')!,
-  updateModal: root.querySelector<HTMLDivElement>('#updateModal')!,
+    updateModal: root.querySelector<HTMLDivElement>('#updateModal')!,
+    aboutModal: root.querySelector<HTMLDivElement>('#aboutModal')!,
     authOverlay: root.querySelector<HTMLDivElement>('#authOverlay')!,
     confirmMassPermLeave: root.querySelector<HTMLDivElement>('#confirmMassPermLeave')!,
     settings: root.querySelector<HTMLDivElement>('.settings')!,
@@ -251,7 +257,10 @@ export function initApp(root: HTMLElement): void {
   async function hydrateAppVersion(): Promise<void> {
     try {
       const v = await getAppVersion()
-      if (v && els.appVersion) els.appVersion.textContent = v
+      if (v && els.appVersion) {
+        runtimeVersion = v
+        els.appVersion.textContent = v
+      }
     } catch {
       // fallback to static APP_VERSION when not running in Tauri
     }
@@ -414,6 +423,39 @@ export function initApp(root: HTMLElement): void {
         updLater.disabled = false
       }
     })
+  }
+
+  function openAboutModal(): void {
+    els.aboutModal.style.display = 'grid'
+    const v = runtimeVersion || APP_VERSION
+    els.aboutModal.innerHTML = `
+      <div class="wizardCard">
+        <div class="wizardHeader">
+          <div>
+            <div class="wizardTitle">About</div>
+            <div class="wizardHint">Maps Reviewer</div>
+          </div>
+        </div>
+        <div class="wizardBody">
+          <div class="kv">
+            <div class="k">Version</div>
+            <div class="v">v${v} (tag v${v})</div>
+          </div>
+        </div>
+        <div class="wizardFooter">
+          <div class="wizardFooterRight">
+            <button class="btn primary" id="aboutClose">OK</button>
+          </div>
+        </div>
+      </div>
+    `
+
+    const closeBtn = els.aboutModal.querySelector<HTMLButtonElement>('#aboutClose')!
+    const close = () => {
+      els.aboutModal.style.display = 'none'
+      els.aboutModal.innerHTML = ''
+    }
+    closeBtn.addEventListener('click', () => close())
   }
 
   async function checkForUpdatesOnBoot(): Promise<void> {
@@ -1814,6 +1856,7 @@ export function initApp(root: HTMLElement): void {
   els.commandMode.addEventListener('change', () =>
     updateSettings({ commandMode: els.commandMode.value as AppState['settings']['commandMode'] }),
   )
+  els.aboutBtn.addEventListener('click', () => openAboutModal())
   els.queueCommandMode.addEventListener('change', () =>
     updateSettings({ commandMode: els.queueCommandMode.value as AppState['settings']['commandMode'] }),
   )

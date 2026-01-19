@@ -72,6 +72,17 @@ body {
   color: var(--muted);
 }
 
+.linkBtn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.linkBtn:hover {
+  color: var(--text);
+}
+
 .settings {
   display: flex;
   gap: 12px;
