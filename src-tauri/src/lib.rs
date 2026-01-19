@@ -1262,6 +1262,8 @@ pub fn run() {
         .build(),
     )
     .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_process::init())
+    .plugin(tauri_plugin_updater::Builder::new().build())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

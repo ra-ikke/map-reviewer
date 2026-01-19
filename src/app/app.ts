@@ -20,6 +20,9 @@ import {
   onHotkeyMassPermPlay,
   onMassPermHotkeysStatus,
   onClipboardChanged,
+  checkForUpdate,
+  downloadAndInstallUpdate,
+  relaunchApp,
   readClipboardText,
   readTextFileFromPath,
   registerHotkeys,
@@ -84,6 +87,7 @@ export function initApp(root: HTMLElement): void {
   let authed = false
   let authStatusMsg = ''
   let authAutoTried = false
+  let updaterAutoTried = false
 
   // Mass perm (local UI state)
   let massPermMapcodes: string[] = []
@@ -202,6 +206,7 @@ export function initApp(root: HTMLElement): void {
     <div id="confirmLeave" class="wizardOverlay" style="display:none"></div>
     <div id="confirmFinishReview" class="wizardOverlay" style="display:none"></div>
     <div id="submitReviewResult" class="wizardOverlay" style="display:none"></div>
+    <div id="updateModal" class="wizardOverlay" style="display:none"></div>
     <div id="authOverlay" class="wizardOverlay" style="display:none"></div>
     <div id="confirmMassPermLeave" class="wizardOverlay" style="display:none"></div>
   `
@@ -235,6 +240,7 @@ export function initApp(root: HTMLElement): void {
     confirmLeave: root.querySelector<HTMLDivElement>('#confirmLeave')!,
     confirmFinishReview: root.querySelector<HTMLDivElement>('#confirmFinishReview')!,
     submitReviewResult: root.querySelector<HTMLDivElement>('#submitReviewResult')!,
+  updateModal: root.querySelector<HTMLDivElement>('#updateModal')!,
     authOverlay: root.querySelector<HTMLDivElement>('#authOverlay')!,
     confirmMassPermLeave: root.querySelector<HTMLDivElement>('#confirmMassPermLeave')!,
     settings: root.querySelector<HTMLDivElement>('.settings')!,
@@ -309,8 +315,105 @@ export function initApp(root: HTMLElement): void {
       els.confirmLeave.style.display = 'none'
       els.confirmFinishReview.style.display = 'none'
       els.submitReviewResult.style.display = 'none'
+      els.updateModal.style.display = 'none'
       els.confirmMassPermLeave.style.display = 'none'
       setShellVisible(false)
+    }
+  }
+
+  function openUpdateModal(args: { version: string; body?: string | null }): void {
+    els.updateModal.style.display = 'grid'
+    const notes = (args.body ?? '').toString().trim()
+    els.updateModal.innerHTML = `
+      <div class="wizardCard">
+        <div class="wizardHeader">
+          <div>
+            <div class="wizardTitle">Update available</div>
+            <div class="wizardHint">A new version is available: <b>${args.version}</b></div>
+          </div>
+        </div>
+        <div class="wizardBody">
+          ${
+            notes
+              ? `<div class="kv">
+                  <div class="k">Release notes</div>
+                  <div class="v" style="white-space: pre-wrap; word-break: break-word;">${notes}</div>
+                </div>`
+              : `<div class="wizardHint">No release notes.</div>`
+          }
+          <div class="status" id="updStatus"></div>
+        </div>
+        <div class="wizardFooter">
+          <div class="wizardFooterLeft">
+            <button class="btn" id="updLater">Later</button>
+          </div>
+          <div class="wizardFooterRight">
+            <button class="btn primary" id="updInstall">Install update</button>
+          </div>
+        </div>
+      </div>
+    `
+
+    const updLater = els.updateModal.querySelector<HTMLButtonElement>('#updLater')!
+    const updInstall = els.updateModal.querySelector<HTMLButtonElement>('#updInstall')!
+    const updStatus = els.updateModal.querySelector<HTMLDivElement>('#updStatus')!
+
+    const close = () => {
+      els.updateModal.style.display = 'none'
+      els.updateModal.innerHTML = ''
+    }
+
+    updLater.addEventListener('click', () => close())
+    updInstall.addEventListener('click', async () => {
+      updInstall.disabled = true
+      updLater.disabled = true
+      updStatus.textContent = 'Downloading update…'
+      try {
+        // We re-check to get the update handle bound to this run.
+        const upd = await checkForUpdate()
+        if (!upd) {
+          updStatus.textContent = 'Update is no longer available.'
+          updLater.disabled = false
+          return
+        }
+
+        await downloadAndInstallUpdate(upd, (ev) => {
+          if (ev.event === 'Started') {
+            updStatus.textContent = 'Download started…'
+          } else if (ev.event === 'Progress') {
+            const total = ev.data?.contentLength
+            const acc = ev.data?.accumulated
+            if (typeof total === 'number' && typeof acc === 'number' && total > 0) {
+              const pct = Math.floor((acc / total) * 100)
+              updStatus.textContent = `Downloading… ${pct}%`
+            } else {
+              updStatus.textContent = 'Downloading…'
+            }
+          } else if (ev.event === 'Finished') {
+            updStatus.textContent = 'Installing…'
+          } else if (ev.event === 'Installed') {
+            updStatus.textContent = 'Installed. Restarting…'
+          }
+        })
+
+        await relaunchApp()
+      } catch (e) {
+        updStatus.textContent = `Update failed: ${String(e)}`
+        updInstall.disabled = false
+        updLater.disabled = false
+      }
+    })
+  }
+
+  async function checkForUpdatesOnBoot(): Promise<void> {
+    if (updaterAutoTried) return
+    updaterAutoTried = true
+    try {
+      const upd = await checkForUpdate()
+      if (!upd) return
+      openUpdateModal({ version: upd.version, body: upd.body })
+    } catch {
+      // silent (best effort)
     }
   }
 
@@ -448,6 +551,7 @@ export function initApp(root: HTMLElement): void {
     render()
     syncNp()
     setShellVisible(true)
+    void checkForUpdatesOnBoot()
 
     // se já existe sessão salva, trava categoria
     if (state.session?.category) {

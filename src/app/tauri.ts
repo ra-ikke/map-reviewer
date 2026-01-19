@@ -1,6 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
+import { check } from '@tauri-apps/plugin-updater'
+import { relaunch } from '@tauri-apps/plugin-process'
 import type { CommandMode } from './model'
 import type { ExportPayloadV1 } from './export'
 import type { ReviewedCategoryCode } from './categories'
@@ -211,4 +213,42 @@ export interface MapInfoResponse {
 
 export async function fetchMapInfo(mapIds: number[]): Promise<MapInfoResponse> {
   return await invoke<MapInfoResponse>('fetch_map_info', { mapIds })
+}
+
+// -------------------------
+// Updater (Tauri plugin)
+// -------------------------
+export type UpdaterDownloadEvent =
+  | { event: 'Started'; data: { contentLength?: number } }
+  | { event: 'Progress'; data: { chunkLength: number; accumulated: number; contentLength?: number } }
+  | { event: 'Finished'; data: unknown }
+  | { event: 'Installed'; data: unknown }
+  | { event: string; data: any }
+
+export interface UpdateAvailable {
+  available: true
+  version: string
+  date?: string | null
+  body?: string | null
+  raw: any
+}
+
+export async function checkForUpdate(): Promise<UpdateAvailable | null> {
+  const upd = await check()
+  if (!upd || !upd.available) return null
+  return {
+    available: true,
+    version: String(upd.version),
+    date: (upd.date ?? null) as any,
+    body: (upd.body ?? null) as any,
+    raw: upd,
+  }
+}
+
+export async function downloadAndInstallUpdate(update: UpdateAvailable, onEvent?: (ev: UpdaterDownloadEvent) => void): Promise<void> {
+  await update.raw.downloadAndInstall(onEvent)
+}
+
+export async function relaunchApp(): Promise<void> {
+  await relaunch()
 }
