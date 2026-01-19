@@ -1,16 +1,21 @@
 :root {
-  --bg: #0b0f17;
-  --panel: #0f1625;
-  --panel2: #101a2b;
-  --text: #e9eef7;
-  --muted: #9aa6bf;
+  --bg: #0f222b;
+  --bg-rgb: 15 34 43;
+  --panel: #14313b;
+  --panel-rgb: 20 49 59;
+  --panel2: #183845;
+  --panel2-rgb: 24 56 69;
+  --text: #e8f3f7;
+  --muted: #9fb5bf;
   --border: rgba(255, 255, 255, 0.08);
-  --primary: #6aa6ff;
-  --primary2: #3d7fff;
-  --danger: #ff6a7b;
+  --primary: #4aa3c5;
+  --primary2: #2b7c9d;
+  --primary-rgb: 74 163 197;
+  --danger: #d36a5c;
+  --danger-rgb: 211 106 92;
 
   color-scheme: dark;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
   line-height: 1.35;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -25,8 +30,8 @@ body {
 
 body {
   margin: 0;
-  background: radial-gradient(1200px 800px at 15% 0%, rgba(106, 166, 255, 0.18), transparent 60%),
-    radial-gradient(1200px 800px at 85% 0%, rgba(255, 106, 123, 0.08), transparent 55%), var(--bg);
+  background: radial-gradient(1200px 800px at 15% 0%, rgb(var(--primary-rgb) / 0.16), transparent 60%),
+    radial-gradient(1200px 800px at 85% 0%, rgb(var(--danger-rgb) / 0.08), transparent 55%), var(--bg);
   color: var(--text);
 }
 
@@ -46,7 +51,7 @@ body {
   justify-content: space-between;
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
-  background: rgba(15, 22, 37, 0.6);
+  background: rgb(var(--panel-rgb) / 0.6);
   backdrop-filter: blur(10px);
 }
 
@@ -100,8 +105,8 @@ body {
 }
 
 .kv select:focus {
-  border-color: rgba(106, 166, 255, 0.45);
-  box-shadow: 0 0 0 3px rgba(106, 166, 255, 0.12);
+  border-color: rgb(var(--primary-rgb) / 0.45);
+  box-shadow: 0 0 0 3px rgb(var(--primary-rgb) / 0.12);
 }
 
 .field.checkbox {
@@ -132,7 +137,7 @@ body.session-active #inputPanel {
 .panel {
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(15, 22, 37, 0.65);
+  background: rgb(var(--panel-rgb) / 0.65);
   backdrop-filter: blur(10px);
   padding: 12px;
   display: flex;
@@ -161,8 +166,8 @@ body.session-active #inputPanel {
   outline: none;
 }
 .textarea:focus {
-  border-color: rgba(106, 166, 255, 0.45);
-  box-shadow: 0 0 0 3px rgba(106, 166, 255, 0.12);
+  border-color: rgb(var(--primary-rgb) / 0.45);
+  box-shadow: 0 0 0 3px rgb(var(--primary-rgb) / 0.12);
 }
 
 .row {
@@ -177,7 +182,7 @@ body.session-active #inputPanel {
   border: 1px solid var(--border);
   padding: 8px 12px;
   color: var(--text);
-  background: rgba(16, 26, 43, 0.8);
+  background: rgb(var(--panel2-rgb) / 0.8);
   cursor: pointer;
   transition:
     border-color 150ms ease,
@@ -185,15 +190,15 @@ body.session-active #inputPanel {
     transform 60ms ease;
 }
 .btn:hover {
-  border-color: rgba(106, 166, 255, 0.35);
-  background: rgba(16, 26, 43, 1);
+  border-color: rgb(var(--primary-rgb) / 0.35);
+  background: rgb(var(--panel2-rgb) / 1);
 }
 .btn:active {
   transform: translateY(1px);
 }
 .btn.primary {
-  border-color: rgba(106, 166, 255, 0.35);
-  background: linear-gradient(180deg, rgba(106, 166, 255, 0.22), rgba(61, 127, 255, 0.12));
+  border-color: rgb(var(--primary-rgb) / 0.35);
+  background: linear-gradient(180deg, rgb(var(--primary-rgb) / 0.22), rgb(var(--primary-rgb) / 0.12));
 }
 
 .status {
@@ -219,7 +224,7 @@ body.session-active #inputPanel {
   padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(16, 26, 43, 0.65);
+  background: rgb(var(--panel2-rgb) / 0.65);
   cursor: pointer;
   color: var(--text);
   text-align: left;
@@ -227,18 +232,18 @@ body.session-active #inputPanel {
 .queueItem.dec-left_as_is {
   background:
     radial-gradient(circle at 8px 8px, rgba(255, 255, 255, 0.14) 0 1px, transparent 1px 100%),
-    rgba(16, 26, 43, 0.82);
+    rgb(var(--panel2-rgb) / 0.82);
   background-size: 16px 16px;
 }
 .queueItem.dec-p1ed {
   background:
     linear-gradient(0deg, rgba(254, 200, 97, 0.14), rgba(254, 200, 97, 0.14)),
-    rgba(16, 26, 43, 0.65);
+    rgb(var(--panel2-rgb) / 0.65);
 }
 .queueItem.dec-will_be_discussed {
   background:
     linear-gradient(0deg, color-mix(in srgb, var(--session-accent, #ff6a7b) 28%, transparent), color-mix(in srgb, var(--session-accent, #ff6a7b) 28%, transparent)),
-    rgba(16, 26, 43, 0.65);
+    rgb(var(--panel2-rgb) / 0.65);
 }
 .queueItem.dec-ignored {
   background:
@@ -246,17 +251,17 @@ body.session-active #inputPanel {
       45deg,
       rgba(154, 166, 191, 0.18) 0px,
       rgba(154, 166, 191, 0.18) 8px,
-      rgba(16, 26, 43, 0.62) 8px,
-      rgba(16, 26, 43, 0.62) 16px
+      rgb(var(--panel2-rgb) / 0.62) 8px,
+      rgb(var(--panel2-rgb) / 0.62) 16px
     ),
-    rgba(16, 26, 43, 0.65);
+    rgb(var(--panel2-rgb) / 0.65);
 }
 .queueItem:hover {
-  border-color: rgba(106, 166, 255, 0.25);
+  border-color: rgb(var(--primary-rgb) / 0.25);
 }
 .queueItem.active {
-  border-color: rgba(106, 166, 255, 0.55);
-  box-shadow: 0 0 0 3px rgba(106, 166, 255, 0.12);
+  border-color: rgb(var(--primary-rgb) / 0.55);
+  box-shadow: 0 0 0 3px rgb(var(--primary-rgb) / 0.12);
 }
 
 .idx {
@@ -304,11 +309,11 @@ body.session-active #inputPanel {
 }
 
 .btn.danger {
-  border-color: rgba(255, 106, 123, 0.25);
-  background: linear-gradient(180deg, rgba(255, 106, 123, 0.18), rgba(255, 106, 123, 0.08));
+  border-color: rgb(var(--danger-rgb) / 0.25);
+  background: linear-gradient(180deg, rgb(var(--danger-rgb) / 0.18), rgb(var(--danger-rgb) / 0.08));
 }
 .btn.danger:hover {
-  border-color: rgba(255, 106, 123, 0.35);
+  border-color: rgb(var(--danger-rgb) / 0.35);
 }
 
 .actions {
@@ -320,7 +325,7 @@ body.session-active #inputPanel {
 .wizardOverlay {
   position: fixed;
   inset: 0;
-  background: rgba(10, 14, 22, 0.72);
+  background: rgb(var(--bg-rgb) / 0.72);
   backdrop-filter: blur(10px);
   display: grid;
   justify-items: center;
@@ -334,7 +339,7 @@ body.session-active #inputPanel {
   width: min(980px, 100%);
   border: 1px solid var(--border);
   border-radius: 16px;
-  background: rgba(15, 22, 37, 0.92);
+  background: rgb(var(--panel-rgb) / 0.92);
   box-shadow: 0 18px 70px rgba(0, 0, 0, 0.45);
   overflow: hidden;
   display: flex;
@@ -380,7 +385,7 @@ body.session-active #inputPanel {
 .categoryTile {
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(16, 26, 43, 0.55);
+  background: rgb(var(--panel2-rgb) / 0.55);
   padding: 12px;
   display: flex;
   gap: 12px;
@@ -390,12 +395,12 @@ body.session-active #inputPanel {
 }
 
 .categoryTile:hover {
-  border-color: rgba(106, 166, 255, 0.25);
+  border-color: rgb(var(--primary-rgb) / 0.25);
 }
 
 .categoryTile.selected {
-  border-color: rgba(106, 166, 255, 0.55);
-  box-shadow: 0 0 0 3px rgba(106, 166, 255, 0.12);
+  border-color: rgb(var(--primary-rgb) / 0.55);
+  box-shadow: 0 0 0 3px rgb(var(--primary-rgb) / 0.12);
 }
 
 .categoryIcon {
@@ -435,19 +440,19 @@ body.session-active #inputPanel {
 .methodTile {
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(16, 26, 43, 0.55);
+  background: rgb(var(--panel2-rgb) / 0.55);
   padding: 12px;
   cursor: pointer;
   text-align: left;
 }
 
 .methodTile:hover {
-  border-color: rgba(106, 166, 255, 0.25);
+  border-color: rgb(var(--primary-rgb) / 0.25);
 }
 
 .methodTile.selected {
-  border-color: rgba(106, 166, 255, 0.55);
-  box-shadow: 0 0 0 3px rgba(106, 166, 255, 0.12);
+  border-color: rgb(var(--primary-rgb) / 0.55);
+  box-shadow: 0 0 0 3px rgb(var(--primary-rgb) / 0.12);
 }
 
 .methodTitle {
@@ -484,7 +489,7 @@ body.session-active #inputPanel {
 
 .kv {
   border: 1px solid var(--border);
-  background: rgba(16, 26, 43, 0.5);
+  background: rgb(var(--panel2-rgb) / 0.5);
   border-radius: 12px;
   padding: 10px 12px;
   margin-bottom: 10px;
