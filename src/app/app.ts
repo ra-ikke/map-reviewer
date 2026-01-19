@@ -516,6 +516,9 @@ export function initApp(root: HTMLElement): void {
           }
         </div>
         <div class="wizardFooter">
+          <div class="wizardFooterLeft">
+            <button class="btn" id="authCheckUpdates">Check for updates</button>
+          </div>
           <div class="wizardFooterRight">
             <button class="btn primary" id="authContinue" ${authed ? '' : 'disabled'}>Continue</button>
           </div>
@@ -526,6 +529,7 @@ export function initApp(root: HTMLElement): void {
     const input = els.authOverlay.querySelector<HTMLInputElement>('#authTokenInput')!
     const validateBtn = els.authOverlay.querySelector<HTMLButtonElement>('#authValidate')!
     const clearBtn = els.authOverlay.querySelector<HTMLButtonElement>('#authClear')!
+    const checkUpdatesBtn = els.authOverlay.querySelector<HTMLButtonElement>('#authCheckUpdates')!
     const contBtn = els.authOverlay.querySelector<HTMLButtonElement>('#authContinue')!
 
     const doValidate = async () => {
@@ -584,6 +588,29 @@ export function initApp(root: HTMLElement): void {
       authBusy = false
       authStatusMsg = ''
       renderAuth()
+    })
+
+    checkUpdatesBtn.addEventListener('click', async () => {
+      if (authBusy) return
+      checkUpdatesBtn.disabled = true
+      authStatusMsg = 'Checking for updates…'
+      renderAuth()
+      try {
+        const upd = await checkForUpdate()
+        if (!upd) {
+          authStatusMsg = 'You are up to date.'
+          renderAuth()
+          return
+        }
+        authStatusMsg = ''
+        renderAuth()
+        openUpdateModal({ version: upd.version, body: upd.body })
+      } catch (e) {
+        authStatusMsg = `Failed to check updates: ${String(e)}`
+        renderAuth()
+      } finally {
+        // button will be recreated on renderAuth()
+      }
     })
 
     contBtn.addEventListener('click', () => {
