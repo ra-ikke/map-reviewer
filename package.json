@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "vite",
     "build": "node scripts/sync-app-version.mjs && tsc && vite build",
+    "tauri": "tauri",
     "preview": "vite preview"
   },
   "devDependencies": {
