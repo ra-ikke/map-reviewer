@@ -10,7 +10,7 @@ export interface CategoryMeta {
 
 // Copiado/adaptado de `xero3.0/resources/category_list.py`.
 // - reviewed=true apenas para categorias de review (P3..P11, P17, P18, P24)
-// - decisions definidas conforme regra do review + "ignored" obrigatório
+// - decisions definidas conforme regra do review + "ignored"
 export const CATEGORIES: CategoryMeta[] = [
   {
     code: 'P0',
