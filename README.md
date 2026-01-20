@@ -25,6 +25,26 @@ In another terminal (or via Tauri):
 npx tauri dev
 ```
 
+## Session API configuration
+
+The app reads Session API settings from three places (priority order):
+
+1. Runtime environment variables
+2. `.env` file (sibling `xero3.0/.env`)
+3. Build-time environment variables
+
+Supported variables:
+
+- `SESSION_API_BASE_URL` (full base URL)
+- `SESSION_API_HOST` and `SESSION_API_PORT`
+- `SESSION_API_TOKEN` (Bearer token)
+
+Example (build-time for CI):
+
+```bash
+SESSION_API_BASE_URL=https://ikke-dev.com.br/ npx tauri build
+```
+
 ## Export JSON
 
 - Click **“Export JSON”** (top bar).

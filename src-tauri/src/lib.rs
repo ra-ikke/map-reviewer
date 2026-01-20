@@ -347,6 +347,11 @@ pub fn run() {
     let env_port = std::env::var("SESSION_API_PORT").ok().unwrap_or_default();
     let env_token = std::env::var("SESSION_API_TOKEN").ok().unwrap_or_default();
 
+    let build_base_url = option_env!("SESSION_API_BASE_URL").unwrap_or("").to_string();
+    let build_host = option_env!("SESSION_API_HOST").unwrap_or("").to_string();
+    let build_port = option_env!("SESSION_API_PORT").unwrap_or("").to_string();
+    let build_token = option_env!("SESSION_API_TOKEN").unwrap_or("").to_string();
+
     let file_map = read_sibling_dotenv().unwrap_or_default();
 
     let file_base_url = file_map.get("SESSION_API_BASE_URL").cloned().unwrap_or_default();
@@ -354,6 +359,8 @@ pub fn run() {
       env_base_url
     } else if !file_base_url.trim().is_empty() {
       file_base_url
+    } else if !build_base_url.trim().is_empty() {
+      build_base_url
     } else {
       String::new()
     };
@@ -361,11 +368,13 @@ pub fn run() {
     let hostport_configured = !env_host.trim().is_empty()
       || !env_port.trim().is_empty()
       || file_map.contains_key("SESSION_API_HOST")
-      || file_map.contains_key("SESSION_API_PORT");
+      || file_map.contains_key("SESSION_API_PORT")
+      || !build_host.trim().is_empty()
+      || !build_port.trim().is_empty();
 
     // Priority:
-    // 1) SESSION_API_BASE_URL (env or .env)
-    // 2) SESSION_API_HOST/PORT (env or .env) -> http://host:port
+    // 1) SESSION_API_BASE_URL (runtime env, .env, build-time env)
+    // 2) SESSION_API_HOST/PORT (runtime env, .env, build-time env) -> http://host:port
     // 3) default -> ngrok base url (user request)
     let base_url = if !base_url_raw.trim().is_empty() {
       normalize_base_url(&base_url_raw)
@@ -373,7 +382,14 @@ pub fn run() {
       let host = (if !env_host.trim().is_empty() {
         env_host
       } else {
-        file_map.get("SESSION_API_HOST").cloned().unwrap_or_else(|| "127.0.0.1".to_string())
+        let file_host = file_map.get("SESSION_API_HOST").cloned().unwrap_or_default();
+        if !file_host.trim().is_empty() {
+          file_host
+        } else if !build_host.trim().is_empty() {
+          build_host
+        } else {
+          "127.0.0.1".to_string()
+        }
       })
       .trim()
       .to_string();
@@ -381,7 +397,14 @@ pub fn run() {
       let port_raw = (if !env_port.trim().is_empty() {
         env_port
       } else {
-        file_map.get("SESSION_API_PORT").cloned().unwrap_or_else(|| "8765".to_string())
+        let file_port = file_map.get("SESSION_API_PORT").cloned().unwrap_or_default();
+        if !file_port.trim().is_empty() {
+          file_port
+        } else if !build_port.trim().is_empty() {
+          build_port
+        } else {
+          "8765".to_string()
+        }
       })
       .trim()
       .to_string();
@@ -395,7 +418,12 @@ pub fn run() {
     let token = (if !env_token.trim().is_empty() {
       env_token
     } else {
-      file_map.get("SESSION_API_TOKEN").cloned().unwrap_or_default()
+      let file_token = file_map.get("SESSION_API_TOKEN").cloned().unwrap_or_default();
+      if !file_token.trim().is_empty() {
+        file_token
+      } else {
+        build_token
+      }
     })
     .trim()
     .to_string();
