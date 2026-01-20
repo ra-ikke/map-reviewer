@@ -49,6 +49,7 @@ jobs:
           # Required for updater artifacts/signing:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          SESSION_API_BASE_URL: https://ikke-dev.com.br/
         with:
           # This config enables createUpdaterArtifacts=true
           args: --config src-tauri/tauri.updater.conf.json
