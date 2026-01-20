@@ -40,7 +40,7 @@
       "endpoints": [
         "https://github.com/carva/map-reviewer/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZFMEJDMzU2QzZENzY5RUMKUldUc2FkZkdWc01MYm1HOWRmOGoxWjJSUHhQZFB2MnZ3aHJyT2hidEhaSG4rZVFvM0kwSTl5RzYK"
+      "pubkey": "untrusted comment: minisign public key: 6E0BC356C6D769EC\nRWTsadfGVsMLbmG9df8j1Z2RPxPdPv2vwhrrOhbtHZHn+eQo3I0I9yG6"
     }
   }
 }
