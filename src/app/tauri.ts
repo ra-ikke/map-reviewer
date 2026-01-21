@@ -128,7 +128,7 @@ export async function sendCustomToActiveWindow(args: { mapcode: string; prefix: 
 
 export async function setMassPermHotkeysConfig(args: {
   enabled: boolean
-  hotkeys: { play: string; pause: string; next: string; prev: string }
+  hotkeys: { toggle: string; playCurrent: string; next: string; prev: string }
 }): Promise<void> {
   await invoke('set_massperm_hotkeys_enabled_cmd', { args })
 }
@@ -156,12 +156,12 @@ export async function setReviewHotkeysEnabled(enabled: boolean): Promise<void> {
   await invoke('set_review_hotkeys_enabled_cmd', { enabled })
 }
 
-export async function onHotkeyMassPermPlay(cb: () => void): Promise<UnlistenFn> {
-  return await listen('hotkey_massperm_play', () => cb())
+export async function onHotkeyMassPermToggle(cb: () => void): Promise<UnlistenFn> {
+  return await listen('hotkey_massperm_toggle', () => cb())
 }
 
-export async function onHotkeyMassPermPause(cb: () => void): Promise<UnlistenFn> {
-  return await listen('hotkey_massperm_pause', () => cb())
+export async function onHotkeyMassPermPlayCurrent(cb: () => void): Promise<UnlistenFn> {
+  return await listen('hotkey_massperm_play_current', () => cb())
 }
 
 export async function onHotkeyMassPermNext(cb: () => void): Promise<UnlistenFn> {

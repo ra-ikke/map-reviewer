@@ -188,6 +188,18 @@ body.session-active #inputPanel {
   flex-wrap: wrap;
 }
 
+.twoCol {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.twoCol .col {
+  flex: 1;
+  min-width: 260px;
+}
+
 .btn {
   border-radius: 10px;
   border: 1px solid var(--border);

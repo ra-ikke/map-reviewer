@@ -108,8 +108,8 @@ pub fn run() {
   #[derive(Clone, serde::Deserialize, Debug)]
   #[serde(rename_all = "camelCase")]
   struct MassPermHotkeysArgs {
-    play: String,
-    pause: String,
+    toggle: String,
+    play_current: String,
     next: String,
     prev: String,
   }
@@ -876,21 +876,21 @@ pub fn run() {
   ) -> Result<(), String> {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-    let play_accel = hotkeys.play.trim();
-    let pause_accel = hotkeys.pause.trim();
+    let toggle_accel = hotkeys.toggle.trim();
+    let play_current_accel = hotkeys.play_current.trim();
     let next_accel = hotkeys.next.trim();
     let prev_accel = hotkeys.prev.trim();
 
-    if play_accel.is_empty() || pause_accel.is_empty() || next_accel.is_empty() || prev_accel.is_empty() {
+    if toggle_accel.is_empty() || play_current_accel.is_empty() || next_accel.is_empty() || prev_accel.is_empty() {
       return Err("empty mass perm hotkey".to_string());
     }
 
-    let mp_play = play_accel
+    let mp_play = toggle_accel
       .parse::<tauri_plugin_global_shortcut::Shortcut>()
-      .map_err(|_| format!("invalid hotkey (play): {play_accel}"))?;
-    let mp_pause = pause_accel
+      .map_err(|_| format!("invalid hotkey (toggle): {toggle_accel}"))?;
+    let mp_pause = play_current_accel
       .parse::<tauri_plugin_global_shortcut::Shortcut>()
-      .map_err(|_| format!("invalid hotkey (pause): {pause_accel}"))?;
+      .map_err(|_| format!("invalid hotkey (playCurrent): {play_current_accel}"))?;
     let mp_next = next_accel
       .parse::<tauri_plugin_global_shortcut::Shortcut>()
       .map_err(|_| format!("invalid hotkey (next): {next_accel}"))?;
@@ -1319,12 +1319,12 @@ pub fn run() {
           if reg.mp_enabled.load(Ordering::SeqCst) {
             let mp_play = reg.mp_play.lock().ok().and_then(|g| g.clone());
             if mp_play.as_ref() == Some(shortcut) {
-              let _ = app.emit("hotkey_massperm_play", ());
+              let _ = app.emit("hotkey_massperm_toggle", ());
               return;
             }
             let mp_pause = reg.mp_pause.lock().ok().and_then(|g| g.clone());
             if mp_pause.as_ref() == Some(shortcut) {
-              let _ = app.emit("hotkey_massperm_pause", ());
+              let _ = app.emit("hotkey_massperm_play_current", ());
               return;
             }
             let mp_prev = reg.mp_prev.lock().ok().and_then(|g| g.clone());

@@ -46,8 +46,8 @@ export interface Settings {
     replayCurrent: string
   }
   massPermHotkeys: {
-    play: string
-    pause: string
+    toggle: string
+    playCurrent: string
     next: string
     prev: string
   }
@@ -76,8 +76,8 @@ export const DEFAULT_SETTINGS: Settings = {
     replayCurrent: 'Insert',
   },
   massPermHotkeys: {
-    play: 'Insert',
-    pause: 'Delete',
+    toggle: 'Ctrl+P',
+    playCurrent: 'Insert',
     next: 'PageDown',
     prev: 'PageUp',
   },
@@ -85,5 +85,5 @@ export const DEFAULT_SETTINGS: Settings = {
   authUserId: null,
 }
 
-export const APP_VERSION = '1.0.4'
+export const APP_VERSION = '1.0.5'
 

@@ -15,6 +15,15 @@ export function loadState(): AppState {
     }
 
     const parsedSettings = (parsed.settings ?? {}) as Partial<AppState['settings']>
+    const baseMassPerm = parsedSettings.massPermHotkeys ?? {}
+    const legacyToggle =
+      (baseMassPerm as any).toggle ??
+      (baseMassPerm as any).play ??
+      DEFAULT_SETTINGS.massPermHotkeys.toggle
+    const legacyPlayCurrent = (baseMassPerm as any).playCurrent ?? DEFAULT_SETTINGS.massPermHotkeys.playCurrent
+    const legacyNext = (baseMassPerm as any).next ?? DEFAULT_SETTINGS.massPermHotkeys.next
+    const legacyPrev = (baseMassPerm as any).prev ?? DEFAULT_SETTINGS.massPermHotkeys.prev
+
     const settings: AppState['settings'] = {
       ...DEFAULT_SETTINGS,
       ...parsedSettings,
@@ -23,8 +32,10 @@ export function loadState(): AppState {
         ...(parsedSettings.reviewHotkeys ?? {}),
       },
       massPermHotkeys: {
-        ...DEFAULT_SETTINGS.massPermHotkeys,
-        ...(parsedSettings.massPermHotkeys ?? {}),
+        toggle: legacyToggle,
+        playCurrent: legacyPlayCurrent,
+        next: legacyNext,
+        prev: legacyPrev,
       },
     }
 

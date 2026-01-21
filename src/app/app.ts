@@ -17,8 +17,8 @@ import {
   onHotkeysStatus,
   onHotkeyMassPermNext,
   onHotkeyMassPermPrev,
-  onHotkeyMassPermPause,
-  onHotkeyMassPermPlay,
+  onHotkeyMassPermPlayCurrent,
+  onHotkeyMassPermToggle,
   onMassPermHotkeysStatus,
   onClipboardChanged,
   checkForUpdate,
@@ -1187,16 +1187,34 @@ export function initApp(root: HTMLElement): void {
             <div class="wizardHint">Preview: <b>${previewPerm}</b></div>
           </div>
 
-          <div class="kv">
-            <div class="k">Map list</div>
-            <textarea id="mpTextarea" class="textarea" rows="6" placeholder="Paste mapcodes here (one per line)"></textarea>
-            <div class="row">
-              <button class="btn primary" id="mpAddTextarea">Load from textarea</button>
-              <button class="btn" id="mpFromClipboard">Load from clipboard</button>
-              <button class="btn" id="mpFromFile">Import file</button>
-              <button class="btn danger" id="mpClearList">Clear list</button>
+          <div class="twoCol">
+            <div class="kv col">
+              <div class="k">Import</div>
+              <textarea id="mpTextarea" class="textarea" rows="6" placeholder="Paste mapcodes here (one per line)"></textarea>
+              <div class="row">
+                <button class="btn primary" id="mpAddTextarea">Load from textarea</button>
+                <button class="btn" id="mpFromClipboard">Load from clipboard</button>
+                <button class="btn" id="mpFromFile">Import file</button>
+                <button class="btn danger" id="mpClearList">Clear list</button>
+              </div>
+              <div class="status" id="mpStatus"></div>
             </div>
-            <div class="status" id="mpStatus"></div>
+            <div class="kv col">
+              <div class="k">Queue</div>
+              <div class="queue" id="mpQueue">
+                ${massPermMapcodes
+                  .map((mc, idx) => {
+                    const active = idx === massPermIndex ? 'active' : ''
+                    return `
+                      <button class="queueItem ${active}" data-index="${idx}" title="@${mc}">
+                        <span class="idx">${idx + 1}</span>
+                        <span class="mc">@${String(mc).replace(/^@+/, '')}</span>
+                      </button>
+                    `
+                  })
+                  .join('')}
+              </div>
+            </div>
           </div>
 
           <div class="kv">
@@ -1215,12 +1233,14 @@ export function initApp(root: HTMLElement): void {
 
           <label class="field checkbox">
             <input id="mpHotkeys" type="checkbox" ${massPermHotkeysEnabled ? 'checked' : ''} />
-            <span>Enable hotkeys (play: ${mpKeys.play}, pause: ${mpKeys.pause}, next: ${mpKeys.next}, back: ${mpKeys.prev})</span>
+            <span>Enable hotkeys (toggle: ${mpKeys.toggle}, play current: ${mpKeys.playCurrent}, next: ${mpKeys.next}, back: ${mpKeys.prev})</span>
           </label>
 
           <div class="row">
-            <button class="btn primary" id="mpPlay" title="Hotkey: ${mpKeys.play} (${hkLabel})">${massPermRunning ? 'Running…' : 'Play / Resume'}</button>
-            <button class="btn" id="mpPause" title="Hotkey: ${mpKeys.pause} (${hkLabel})">Pause</button>
+            <button class="btn primary" id="mpToggle" title="Hotkey: ${mpKeys.toggle} (${hkLabel})">${
+              massPermRunning ? 'Pause' : massPermIndex > 0 ? 'Resume' : 'Play'
+            }</button>
+            <button class="btn" id="mpPlayCurrent" title="Hotkey: ${mpKeys.playCurrent} (${hkLabel})" ${!massPermInFlight ? '' : 'disabled'}>Play current map</button>
             <button class="btn" id="mpPrev" title="Hotkey: ${mpKeys.prev} (${hkLabel})" ${canManualNav ? '' : 'disabled'}>Back</button>
             <button class="btn" id="mpNext" title="Hotkey: ${mpKeys.next} (${hkLabel})" ${canManualNav ? '' : 'disabled'}>Next map</button>
             <button class="btn danger" id="mpCancel" ${canCancelToHome ? '' : 'disabled'}>Cancel</button>
@@ -1237,14 +1257,15 @@ export function initApp(root: HTMLElement): void {
     const mpFromClipboard = els.massPerm.querySelector<HTMLButtonElement>('#mpFromClipboard')!
     const mpFromFile = els.massPerm.querySelector<HTMLButtonElement>('#mpFromFile')!
     const mpClearList = els.massPerm.querySelector<HTMLButtonElement>('#mpClearList')!
-    const mpPlay = els.massPerm.querySelector<HTMLButtonElement>('#mpPlay')!
-    const mpPause = els.massPerm.querySelector<HTMLButtonElement>('#mpPause')!
+    const mpToggle = els.massPerm.querySelector<HTMLButtonElement>('#mpToggle')!
+    const mpPlayCurrent = els.massPerm.querySelector<HTMLButtonElement>('#mpPlayCurrent')!
     const mpPrev = els.massPerm.querySelector<HTMLButtonElement>('#mpPrev')!
     const mpNext = els.massPerm.querySelector<HTMLButtonElement>('#mpNext')!
     const mpCancel = els.massPerm.querySelector<HTMLButtonElement>('#mpCancel')!
     const mpHotkeysConfig = els.massPerm.querySelector<HTMLButtonElement>('#mpHotkeysConfig')!
     const mpHotkeys = els.massPerm.querySelector<HTMLInputElement>('#mpHotkeys')!
     const mpInterval = els.massPerm.querySelector<HTMLSelectElement>('#mpInterval')!
+    const mpQueue = els.massPerm.querySelector<HTMLDivElement>('#mpQueue')!
 
     mpCategory.value = massPermCategoryCode
     mpInterval.value = massPermIntervalSec.toFixed(1)
@@ -1365,7 +1386,7 @@ export function initApp(root: HTMLElement): void {
       renderMassPerm()
     })
 
-    mpPlay.addEventListener('click', () => {
+    const startMassPerm = () => {
       const resolved = normalizeCategorySelection(massPermCategoryCode)
       if (!resolved.number) {
         setMassPermStatus('Invalid category number.')
@@ -1414,11 +1435,38 @@ export function initApp(root: HTMLElement): void {
 
       renderMassPerm()
       setMassPermStatus('Running… focus the game window.')
-    })
+    }
 
-    mpPause.addEventListener('click', () => {
+    const pauseMassPerm = () => {
       stopMassPerm()
       setMassPermStatus('Paused.')
+      renderMassPerm()
+    }
+
+    mpToggle.addEventListener('click', () => {
+      if (massPermRunning) {
+        pauseMassPerm()
+      } else {
+        startMassPerm()
+      }
+    })
+
+    mpPlayCurrent.addEventListener('click', async () => {
+      if (massPermInFlight) return
+      const resolved = normalizeCategorySelection(massPermCategoryCode)
+      if (!resolved.number) {
+        setMassPermStatus('Invalid category number.')
+        return
+      }
+      const mc = massPermMapcodes[massPermIndex]
+      if (!mc) {
+        setMassPermStatus('No current map selected.')
+        return
+      }
+      massPermInFlight = true
+      await massPermSendPerm(mc, resolved.number, 'current')
+      massPermLastSentIndex = massPermIndex
+      massPermInFlight = false
       renderMassPerm()
     })
 
@@ -1458,6 +1506,21 @@ export function initApp(root: HTMLElement): void {
       }
       openConfirmMassPermLeave()
     })
+
+    if (mpQueue) {
+      for (const btn of Array.from(mpQueue.querySelectorAll<HTMLButtonElement>('button.queueItem'))) {
+        btn.addEventListener('click', () => {
+          if (massPermRunning || massPermInFlight) {
+            setMassPermStatus('Pause first to change the current map.')
+            return
+          }
+          const idx = Number.parseInt(btn.dataset.index ?? '', 10)
+          if (!Number.isFinite(idx)) return
+          massPermIndex = Math.max(0, Math.min(idx, massPermMapcodes.length - 1))
+          renderMassPerm()
+        })
+      }
+    }
 
     mpNext.addEventListener('click', async () => {
       if (massPermInFlight) return
@@ -1532,16 +1595,34 @@ export function initApp(root: HTMLElement): void {
             <div class="wizardHint">Preview: <b>${preview}</b></div>
           </div>
 
-          <div class="kv">
-            <div class="k">Map list</div>
-            <textarea id="ccTextarea" class="textarea" rows="6" placeholder="Paste mapcodes here (one per line)"></textarea>
-            <div class="row">
-              <button class="btn primary" id="ccAddTextarea">Load from textarea</button>
-              <button class="btn" id="ccFromClipboard">Load from clipboard</button>
-              <button class="btn" id="ccFromFile">Import file</button>
-              <button class="btn danger" id="ccClearList">Clear list</button>
+          <div class="twoCol">
+            <div class="kv col">
+              <div class="k">Import</div>
+              <textarea id="ccTextarea" class="textarea" rows="6" placeholder="Paste mapcodes here (one per line)"></textarea>
+              <div class="row">
+                <button class="btn primary" id="ccAddTextarea">Load from textarea</button>
+                <button class="btn" id="ccFromClipboard">Load from clipboard</button>
+                <button class="btn" id="ccFromFile">Import file</button>
+                <button class="btn danger" id="ccClearList">Clear list</button>
+              </div>
+              <div class="status" id="ccStatus"></div>
             </div>
-            <div class="status" id="ccStatus"></div>
+            <div class="kv col">
+              <div class="k">Queue</div>
+              <div class="queue" id="ccQueue">
+                ${customCmdMapcodes
+                  .map((mc, idx) => {
+                    const active = idx === customCmdIndex ? 'active' : ''
+                    return `
+                      <button class="queueItem ${active}" data-index="${idx}" title="@${mc}">
+                        <span class="idx">${idx + 1}</span>
+                        <span class="mc">@${String(mc).replace(/^@+/, '')}</span>
+                      </button>
+                    `
+                  })
+                  .join('')}
+              </div>
+            </div>
           </div>
 
           <div class="kv">
@@ -1560,12 +1641,14 @@ export function initApp(root: HTMLElement): void {
 
           <label class="field checkbox">
             <input id="ccHotkeys" type="checkbox" ${massPermHotkeysEnabled ? 'checked' : ''} />
-            <span>Enable hotkeys (play: ${mpKeys.play}, pause: ${mpKeys.pause}, next: ${mpKeys.next}, back: ${mpKeys.prev})</span>
+            <span>Enable hotkeys (toggle: ${mpKeys.toggle}, play current: ${mpKeys.playCurrent}, next: ${mpKeys.next}, back: ${mpKeys.prev})</span>
           </label>
 
           <div class="row">
-            <button class="btn primary" id="ccPlay" title="Hotkey: ${mpKeys.play} (${hkLabel})">${customCmdRunning ? 'Running…' : 'Play / Resume'}</button>
-            <button class="btn" id="ccPause" title="Hotkey: ${mpKeys.pause} (${hkLabel})">Pause</button>
+            <button class="btn primary" id="ccToggle" title="Hotkey: ${mpKeys.toggle} (${hkLabel})">${
+              customCmdRunning ? 'Pause' : customCmdIndex > 0 ? 'Resume' : 'Play'
+            }</button>
+            <button class="btn" id="ccPlayCurrent" title="Hotkey: ${mpKeys.playCurrent} (${hkLabel})" ${!customCmdInFlight ? '' : 'disabled'}>Play current map</button>
             <button class="btn" id="ccPrev" title="Hotkey: ${mpKeys.prev} (${hkLabel})" ${canManualNav ? '' : 'disabled'}>Back</button>
             <button class="btn" id="ccNext" title="Hotkey: ${mpKeys.next} (${hkLabel})" ${canManualNav ? '' : 'disabled'}>Next map</button>
             <button class="btn danger" id="ccCancel" ${canManualNav ? '' : 'disabled'}>Cancel</button>
@@ -1582,14 +1665,15 @@ export function initApp(root: HTMLElement): void {
     const ccFromClipboard = els.customCommand.querySelector<HTMLButtonElement>('#ccFromClipboard')!
     const ccFromFile = els.customCommand.querySelector<HTMLButtonElement>('#ccFromFile')!
     const ccClearList = els.customCommand.querySelector<HTMLButtonElement>('#ccClearList')!
-    const ccPlay = els.customCommand.querySelector<HTMLButtonElement>('#ccPlay')!
-    const ccPause = els.customCommand.querySelector<HTMLButtonElement>('#ccPause')!
+    const ccToggle = els.customCommand.querySelector<HTMLButtonElement>('#ccToggle')!
+    const ccPlayCurrent = els.customCommand.querySelector<HTMLButtonElement>('#ccPlayCurrent')!
     const ccPrev = els.customCommand.querySelector<HTMLButtonElement>('#ccPrev')!
     const ccNext = els.customCommand.querySelector<HTMLButtonElement>('#ccNext')!
     const ccCancel = els.customCommand.querySelector<HTMLButtonElement>('#ccCancel')!
     const ccHotkeys = els.customCommand.querySelector<HTMLInputElement>('#ccHotkeys')!
     const ccInterval = els.customCommand.querySelector<HTMLSelectElement>('#ccInterval')!
     const ccHotkeysConfig = els.customCommand.querySelector<HTMLButtonElement>('#ccHotkeysConfig')!
+    const ccQueue = els.customCommand.querySelector<HTMLDivElement>('#ccQueue')!
 
     ccPrefix.value = customCmdPrefix
     ccSuffix.value = customCmdSuffix
@@ -1713,7 +1797,7 @@ export function initApp(root: HTMLElement): void {
       renderCustomCommand()
     })
 
-    ccPlay.addEventListener('click', () => {
+    const startCustomCommand = () => {
       const prefix = customCmdPrefix.trim()
       if (!prefix) {
         setCustomCommandStatus('Enter a prefix first (e.g. /np, !np, /p 100).')
@@ -1755,11 +1839,38 @@ export function initApp(root: HTMLElement): void {
 
       renderCustomCommand()
       setCustomCommandStatus('Running… focus the game window.')
-    })
+    }
 
-    ccPause.addEventListener('click', () => {
+    const pauseCustomCommand = () => {
       stopCustomCommand()
       setCustomCommandStatus('Paused.')
+      renderCustomCommand()
+    }
+
+    ccToggle.addEventListener('click', () => {
+      if (customCmdRunning) {
+        pauseCustomCommand()
+      } else {
+        startCustomCommand()
+      }
+    })
+
+    ccPlayCurrent.addEventListener('click', async () => {
+      if (customCmdInFlight) return
+      const prefix = customCmdPrefix.trim()
+      if (!prefix) {
+        setCustomCommandStatus('Enter a prefix first.')
+        return
+      }
+      const mc = customCmdMapcodes[customCmdIndex]
+      if (!mc) {
+        setCustomCommandStatus('No current map selected.')
+        return
+      }
+      customCmdInFlight = true
+      await customCommandSend(mc, prefix, customCmdSuffix, 'current')
+      customCmdLastSentIndex = customCmdIndex
+      customCmdInFlight = false
       renderCustomCommand()
     })
 
@@ -1833,6 +1944,21 @@ export function initApp(root: HTMLElement): void {
       openLauncher({ allowReturnToSession: Boolean(state.session) })
       setCustomCommandStatus('Custom command cancelled.')
     })
+
+    if (ccQueue) {
+      for (const btn of Array.from(ccQueue.querySelectorAll<HTMLButtonElement>('button.queueItem'))) {
+        btn.addEventListener('click', () => {
+          if (customCmdRunning || customCmdInFlight) {
+            setCustomCommandStatus('Pause first to change the current map.')
+            return
+          }
+          const idx = Number.parseInt(btn.dataset.index ?? '', 10)
+          if (!Number.isFinite(idx)) return
+          customCmdIndex = Math.max(0, Math.min(idx, customCmdMapcodes.length - 1))
+          renderCustomCommand()
+        })
+      }
+    }
   }
 
   function openCustomCommand(): void {
@@ -2288,8 +2414,8 @@ export function initApp(root: HTMLElement): void {
     await setMassPermHotkeysConfig({
       enabled,
       hotkeys: {
-        play: hk.play,
-        pause: hk.pause,
+        toggle: hk.toggle,
+        playCurrent: hk.playCurrent,
         next: hk.next,
         prev: hk.prev,
       },
@@ -2316,8 +2442,8 @@ export function initApp(root: HTMLElement): void {
           { id: 'replayCurrent', label: 'Replay current', value: reviewCurrent.replayCurrent },
         ]
       : [
-          { id: 'play', label: 'Play / Resume', value: massCurrent.play },
-          { id: 'pause', label: 'Pause', value: massCurrent.pause },
+          { id: 'toggle', label: 'Play / Pause / Resume', value: massCurrent.toggle },
+          { id: 'playCurrent', label: 'Play current map', value: massCurrent.playCurrent },
           { id: 'prev', label: 'Back', value: massCurrent.prev },
           { id: 'next', label: 'Next', value: massCurrent.next },
         ]
@@ -2466,8 +2592,8 @@ export function initApp(root: HTMLElement): void {
           if (reviewLabel) reviewLabel.title = getReviewHotkeysTitle()
         } else {
           const updated = {
-            play: next.play,
-            pause: next.pause,
+            toggle: next.toggle,
+            playCurrent: next.playCurrent,
             next: next.next,
             prev: next.prev,
           }
@@ -3213,29 +3339,29 @@ export function initApp(root: HTMLElement): void {
   })
 
   // hotkeys globais do mass perm (best effort)
-  void onHotkeyMassPermPlay(() => {
+  void onHotkeyMassPermToggle(() => {
     if (!massPermHotkeysEnabled) return
     if (els.customCommand.style.display === 'grid') {
-      const btn = els.customCommand.querySelector<HTMLButtonElement>('#ccPlay')
+      const btn = els.customCommand.querySelector<HTMLButtonElement>('#ccToggle')
       btn?.click()
       return
     }
     if (els.massPerm.style.display === 'grid') {
-      const btn = els.massPerm.querySelector<HTMLButtonElement>('#mpPlay')
+      const btn = els.massPerm.querySelector<HTMLButtonElement>('#mpToggle')
       btn?.click()
     }
   }).catch(() => {
     // best effort
   })
-  void onHotkeyMassPermPause(() => {
+  void onHotkeyMassPermPlayCurrent(() => {
     if (!massPermHotkeysEnabled) return
     if (els.customCommand.style.display === 'grid') {
-      const btn = els.customCommand.querySelector<HTMLButtonElement>('#ccPause')
+      const btn = els.customCommand.querySelector<HTMLButtonElement>('#ccPlayCurrent')
       btn?.click()
       return
     }
     if (els.massPerm.style.display === 'grid') {
-      const btn = els.massPerm.querySelector<HTMLButtonElement>('#mpPause')
+      const btn = els.massPerm.querySelector<HTMLButtonElement>('#mpPlayCurrent')
       btn?.click()
     }
   }).catch(() => {
