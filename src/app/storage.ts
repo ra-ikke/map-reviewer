@@ -14,9 +14,23 @@ export function loadState(): AppState {
       ;(session as any).threadId = String((session as any).threadId)
     }
 
+    const parsedSettings = (parsed.settings ?? {}) as Partial<AppState['settings']>
+    const settings: AppState['settings'] = {
+      ...DEFAULT_SETTINGS,
+      ...parsedSettings,
+      reviewHotkeys: {
+        ...DEFAULT_SETTINGS.reviewHotkeys,
+        ...(parsedSettings.reviewHotkeys ?? {}),
+      },
+      massPermHotkeys: {
+        ...DEFAULT_SETTINGS.massPermHotkeys,
+        ...(parsedSettings.massPermHotkeys ?? {}),
+      },
+    }
+
     return {
       appVersion: parsed.appVersion ?? APP_VERSION,
-      settings: { ...DEFAULT_SETTINGS, ...(parsed.settings ?? {}) },
+      settings,
       session,
       items: Array.isArray(parsed.items) ? parsed.items : [],
       selectedId: typeof parsed.selectedId === 'string' ? parsed.selectedId : null,

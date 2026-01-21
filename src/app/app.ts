@@ -16,6 +16,7 @@ import {
   onHotkeyReplayCurrent,
   onHotkeysStatus,
   onHotkeyMassPermNext,
+  onHotkeyMassPermPrev,
   onHotkeyMassPermPause,
   onHotkeyMassPermPlay,
   onMassPermHotkeysStatus,
@@ -28,7 +29,7 @@ import {
   readTextFileFromPath,
   registerHotkeys,
   setReviewHotkeysEnabled,
-  setMassPermHotkeysEnabled,
+  setMassPermHotkeysConfig,
   writeClipboardText,
   sendNpToActiveWindow,
   setNpContext,
@@ -99,9 +100,19 @@ export function initApp(root: HTMLElement): void {
   let massPermTimer: number | null = null
   let massPermInFlight = false
   let massPermCategoryCode: string = 'P4'
-  let massPermCustomPrefix: string = ''
   let massPermHotkeysEnabled = true
   let massPermIntervalSec = 0.3
+
+  // Custom command (local UI state)
+  let customCmdMapcodes: string[] = []
+  let customCmdIndex = 0
+  let customCmdLastSentIndex: number | null = null
+  let customCmdRunning = false
+  let customCmdTimer: number | null = null
+  let customCmdInFlight = false
+  let customCmdPrefix = ''
+  let customCmdSuffix = ''
+  let customCmdIntervalSec = 0.3
 
   function updateCompactMode(): void {
     const w = window.innerWidth
@@ -189,6 +200,7 @@ export function initApp(root: HTMLElement): void {
                 <input id="reviewHotkeys" type="checkbox" />
                 <span>Hotkeys</span>
               </label>
+              <button id="reviewHotkeysConfig" class="btn">Config hotkeys</button>
               <label class="field checkbox">
                 <input id="showIgnored" type="checkbox" />
                 <span>Show ignored</span>
@@ -214,6 +226,8 @@ export function initApp(root: HTMLElement): void {
     <div id="authOverlay" class="wizardOverlay" style="display:none"></div>
     <div id="confirmMassPermLeave" class="wizardOverlay" style="display:none"></div>
     <div id="aboutModal" class="wizardOverlay" style="display:none"></div>
+    <div id="hotkeysModal" class="wizardOverlay" style="display:none"></div>
+    <div id="customCommand" class="wizardOverlay" style="display:none"></div>
   `
 
   const els = {
@@ -240,6 +254,7 @@ export function initApp(root: HTMLElement): void {
     queue: root.querySelector<HTMLDivElement>('#queue')!,
     queueCommandMode: root.querySelector<HTMLSelectElement>('#queueCommandMode')!,
     reviewHotkeys: root.querySelector<HTMLInputElement>('#reviewHotkeys')!,
+    reviewHotkeysConfig: root.querySelector<HTMLButtonElement>('#reviewHotkeysConfig')!,
     showIgnored: root.querySelector<HTMLInputElement>('#showIgnored')!,
     details: root.querySelector<HTMLDivElement>('#details')!,
     wizard: root.querySelector<HTMLDivElement>('#wizard')!,
@@ -249,6 +264,8 @@ export function initApp(root: HTMLElement): void {
     submitReviewResult: root.querySelector<HTMLDivElement>('#submitReviewResult')!,
     updateModal: root.querySelector<HTMLDivElement>('#updateModal')!,
     aboutModal: root.querySelector<HTMLDivElement>('#aboutModal')!,
+    hotkeysModal: root.querySelector<HTMLDivElement>('#hotkeysModal')!,
+    customCommand: root.querySelector<HTMLDivElement>('#customCommand')!,
     authOverlay: root.querySelector<HTMLDivElement>('#authOverlay')!,
     confirmMassPermLeave: root.querySelector<HTMLDivElement>('#confirmMassPermLeave')!,
     settings: root.querySelector<HTMLDivElement>('.settings')!,
@@ -272,6 +289,11 @@ export function initApp(root: HTMLElement): void {
 
   function setMassPermStatus(msg: string): void {
     const el = els.massPerm.querySelector<HTMLDivElement>('#mpStatus')
+    if (el) el.textContent = msg
+  }
+
+  function setCustomCommandStatus(msg: string): void {
+    const el = els.customCommand.querySelector<HTMLDivElement>('#ccStatus')
     if (el) el.textContent = msg
   }
 
@@ -332,6 +354,7 @@ export function initApp(root: HTMLElement): void {
       // garante que nada “fure” o login
       els.wizard.style.display = 'none'
       els.massPerm.style.display = 'none'
+      els.customCommand.style.display = 'none'
       els.confirmLeave.style.display = 'none'
       els.confirmFinishReview.style.display = 'none'
       els.submitReviewResult.style.display = 'none'
@@ -1015,15 +1038,33 @@ export function initApp(root: HTMLElement): void {
     }
   }
 
+  function stopCustomCommand(): void {
+    customCmdRunning = false
+    customCmdInFlight = false
+    if (customCmdTimer) {
+      window.clearInterval(customCmdTimer)
+      customCmdTimer = null
+    }
+  }
+
   function resetMassPermData(): void {
     stopMassPerm()
     massPermMapcodes = []
     massPermIndex = 0
     massPermLastSentIndex = null
     massPermCategoryCode = 'P4'
-    massPermCustomPrefix = ''
     massPermHotkeysEnabled = true
     massPermIntervalSec = 0.3
+  }
+
+  function resetCustomCommandData(): void {
+    stopCustomCommand()
+    customCmdMapcodes = []
+    customCmdIndex = 0
+    customCmdLastSentIndex = null
+    customCmdPrefix = ''
+    customCmdSuffix = ''
+    customCmdIntervalSec = 0.3
   }
 
   function openConfirmMassPermLeave(): void {
@@ -1066,7 +1107,7 @@ export function initApp(root: HTMLElement): void {
     cancel.addEventListener('click', () => close())
     confirm.addEventListener('click', () => {
       close()
-      void setMassPermHotkeysEnabled(false).catch(() => {
+      void applyMassPermHotkeysConfig(false).catch(() => {
         // best effort
       })
       resetMassPermData()
@@ -1085,35 +1126,41 @@ export function initApp(root: HTMLElement): void {
     }
   }
 
-  async function massPermSendCustom(mapcode: string, prefix: string, label: string): Promise<void> {
+  function buildCustomCommandPreview(prefix: string, suffix: string, mapcode: string): string {
+    const p = prefix.trim() || '/<prefix>'
+    const s = suffix.trim()
+    const mc = `@${String(mapcode).replace(/^@+/, '') || 'mapcode'}`
+    const raw = s ? `${p} ${mc} ${s}` : `${p} ${mc}`
+    return raw.replace(/\s+@/, ' @').trim()
+  }
+
+  async function customCommandSend(mapcode: string, prefix: string, suffix: string, label: string): Promise<void> {
     try {
-      const cmd = await sendCustomToActiveWindow({ mapcode, prefix })
-      setMassPermStatus(`${label}: sent ${cmd}`)
+      const cmd = await sendCustomToActiveWindow({ mapcode, prefix, suffix })
+      setCustomCommandStatus(`${label}: sent ${cmd}`)
     } catch (e) {
-      setMassPermStatus(`${label}: failed (${String(e)})`)
+      setCustomCommandStatus(`${label}: failed (${String(e)})`)
     }
   }
 
   function renderMassPerm(): void {
-    const categoriesOptions = [
-      ...CATEGORIES.map((c) => `<option value="${c.code}">${c.code} — ${c.description}</option>`),
-      `<option value="__custom__">Custom…</option>`,
-    ].join('')
+    const categoriesOptions = CATEGORIES.map(
+      (c) => `<option value="${c.code}">${c.code} — ${c.description}</option>`,
+    ).join('')
 
-    const selectedIsCustom = massPermCategoryCode === '__custom__'
-    const selectionDisplay = selectedIsCustom ? massPermCustomPrefix : massPermCategoryCode
-    const sel = normalizeCategorySelection(selectionDisplay)
+    const sel = normalizeCategorySelection(massPermCategoryCode)
     const previewMap = massPermMapcodes[massPermIndex] ?? massPermMapcodes[0] ?? '@mapcode'
     const previewMapClean = `@${String(previewMap).replace(/^@+/, '') || 'mapcode'}`
-    const previewCustomPrefix = massPermCustomPrefix.trim() || '/<command>'
-    const previewCustom = `${previewCustomPrefix} ${previewMapClean}`.replace(/\s+@/, ' @')
+    const previewPerm = sel.number != null ? `/p ${sel.number} ${previewMapClean}` : `/p <n> ${previewMapClean}`
 
     const total = massPermMapcodes.length
     const done = Math.min(massPermIndex, total)
     const current = massPermMapcodes[massPermIndex] ?? null
     const last = massPermLastSentIndex != null ? massPermMapcodes[massPermLastSentIndex] ?? null : null
     const canCancelToHome = !massPermRunning && !massPermInFlight
+    const canManualNav = !massPermRunning && !massPermInFlight
     const hkLabel = massPermHotkeysEnabled ? 'enabled' : 'disabled'
+    const mpKeys = state.settings.massPermHotkeys
     const intervalLabel = `${massPermIntervalSec.toFixed(1)}s`
     const intervalOptions = Array.from({ length: 10 }, (_, i) => (i + 1) / 10).map((v) => {
       const label = `${v.toFixed(1)}s`
@@ -1136,10 +1183,8 @@ export function initApp(root: HTMLElement): void {
               <span>Target category</span>
               <select id="mpCategory">${categoriesOptions}</select>
             </label>
-            <input id="mpCustomPrefix" class="textarea" style="min-height:auto; height:34px; padding:6px 10px; display:${selectedIsCustom ? 'block' : 'none'}" placeholder="e.g. /np or !map or /p 100" />
-            <div class="wizardHint" id="mpTargetHint">${
-              selectedIsCustom ? `Preview: <b>${previewCustom}</b>` : `Resolved: <b>${sel.code}</b> (${sel.number ?? 'N/A'})`
-            }</div>
+            <div class="wizardHint" id="mpTargetHint">Resolved: <b>${sel.code}</b> (${sel.number ?? 'N/A'})</div>
+            <div class="wizardHint">Preview: <b>${previewPerm}</b></div>
           </div>
 
           <div class="kv">
@@ -1170,14 +1215,16 @@ export function initApp(root: HTMLElement): void {
 
           <label class="field checkbox">
             <input id="mpHotkeys" type="checkbox" ${massPermHotkeysEnabled ? 'checked' : ''} />
-            <span>Enable hotkeys (Insert/Del/PageDown)</span>
+            <span>Enable hotkeys (play: ${mpKeys.play}, pause: ${mpKeys.pause}, next: ${mpKeys.next}, back: ${mpKeys.prev})</span>
           </label>
 
           <div class="row">
-            <button class="btn primary" id="mpPlay" title="Hotkey: Insert (${hkLabel})">${massPermRunning ? 'Running…' : 'Play / Resume'}</button>
-            <button class="btn" id="mpPause" title="Hotkey: Delete (${hkLabel})">Pause</button>
-            <button class="btn" id="mpNext" title="Hotkey: PageDown (${hkLabel})">Next map</button>
+            <button class="btn primary" id="mpPlay" title="Hotkey: ${mpKeys.play} (${hkLabel})">${massPermRunning ? 'Running…' : 'Play / Resume'}</button>
+            <button class="btn" id="mpPause" title="Hotkey: ${mpKeys.pause} (${hkLabel})">Pause</button>
+            <button class="btn" id="mpPrev" title="Hotkey: ${mpKeys.prev} (${hkLabel})" ${canManualNav ? '' : 'disabled'}>Back</button>
+            <button class="btn" id="mpNext" title="Hotkey: ${mpKeys.next} (${hkLabel})" ${canManualNav ? '' : 'disabled'}>Next map</button>
             <button class="btn danger" id="mpCancel" ${canCancelToHome ? '' : 'disabled'}>Cancel</button>
+            <button class="btn" id="mpHotkeysConfig">Config hotkeys</button>
           </div>
         </div>
       </div>
@@ -1185,7 +1232,6 @@ export function initApp(root: HTMLElement): void {
 
     // bind controls
     const mpCategory = els.massPerm.querySelector<HTMLSelectElement>('#mpCategory')!
-    const mpCustom = els.massPerm.querySelector<HTMLInputElement>('#mpCustomPrefix')!
     const mpTextarea = els.massPerm.querySelector<HTMLTextAreaElement>('#mpTextarea')!
     const mpAddTextarea = els.massPerm.querySelector<HTMLButtonElement>('#mpAddTextarea')!
     const mpFromClipboard = els.massPerm.querySelector<HTMLButtonElement>('#mpFromClipboard')!
@@ -1193,25 +1239,30 @@ export function initApp(root: HTMLElement): void {
     const mpClearList = els.massPerm.querySelector<HTMLButtonElement>('#mpClearList')!
     const mpPlay = els.massPerm.querySelector<HTMLButtonElement>('#mpPlay')!
     const mpPause = els.massPerm.querySelector<HTMLButtonElement>('#mpPause')!
+    const mpPrev = els.massPerm.querySelector<HTMLButtonElement>('#mpPrev')!
     const mpNext = els.massPerm.querySelector<HTMLButtonElement>('#mpNext')!
     const mpCancel = els.massPerm.querySelector<HTMLButtonElement>('#mpCancel')!
+    const mpHotkeysConfig = els.massPerm.querySelector<HTMLButtonElement>('#mpHotkeysConfig')!
     const mpHotkeys = els.massPerm.querySelector<HTMLInputElement>('#mpHotkeys')!
     const mpInterval = els.massPerm.querySelector<HTMLSelectElement>('#mpInterval')!
 
     mpCategory.value = massPermCategoryCode
-    mpCustom.value = massPermCustomPrefix
     mpInterval.value = massPermIntervalSec.toFixed(1)
 
     mpHotkeys.addEventListener('change', async () => {
       massPermHotkeysEnabled = mpHotkeys.checked
       try {
-        await setMassPermHotkeysEnabled(massPermHotkeysEnabled)
+        await applyMassPermHotkeysConfig(massPermHotkeysEnabled)
         setMassPermStatus(`Hotkeys ${massPermHotkeysEnabled ? 'enabled' : 'disabled'}.`)
       } catch (e) {
         setMassPermStatus(`Failed to toggle hotkeys: ${String(e)}`)
         massPermHotkeysEnabled = !massPermHotkeysEnabled
       }
       renderMassPerm()
+    })
+
+    mpHotkeysConfig.addEventListener('click', () => {
+      openHotkeysModal('mass_perm')
     })
 
     mpInterval.addEventListener('change', () => {
@@ -1242,13 +1293,14 @@ export function initApp(root: HTMLElement): void {
           const mc = massPermMapcodes[massPermIndex]!
           massPermInFlight = true
           try {
-            const isCustom = massPermCategoryCode === '__custom__'
-            if (isCustom) {
-              await massPermSendCustom(mc, massPermCustomPrefix, 'auto')
-            } else {
-              const resolved = normalizeCategorySelection(massPermCategoryCode)
-              await massPermSendPerm(mc, resolved.number!, 'auto')
+            const resolved = normalizeCategorySelection(massPermCategoryCode)
+            if (!resolved.number) {
+              setMassPermStatus('Invalid category number.')
+              stopMassPerm()
+              renderMassPerm()
+              return
             }
+            await massPermSendPerm(mc, resolved.number, 'auto')
             massPermLastSentIndex = massPermIndex
             massPermIndex += 1
           } finally {
@@ -1263,29 +1315,6 @@ export function initApp(root: HTMLElement): void {
 
     mpCategory.addEventListener('change', () => {
       massPermCategoryCode = mpCategory.value
-      if (massPermCategoryCode !== '__custom__') {
-        massPermCustomPrefix = ''
-      }
-      renderMassPerm()
-    })
-
-    // Do NOT re-render on each keystroke (it breaks focus). Update preview in-place.
-    mpCustom.addEventListener('input', () => {
-      massPermCustomPrefix = mpCustom.value
-      const hint = els.massPerm.querySelector<HTMLDivElement>('#mpTargetHint')
-      if (!hint) return
-      if (massPermCategoryCode !== '__custom__') return
-
-      const previewMap = massPermMapcodes[massPermIndex] ?? massPermMapcodes[0] ?? '@mapcode'
-      const previewMapClean = `@${String(previewMap).replace(/^@+/, '') || 'mapcode'}`
-      const prefix = mpCustom.value.trim() || '/<command>'
-      const preview = `${prefix} ${previewMapClean}`.replace(/\s+@/, ' @')
-      hint.innerHTML = `Preview: <b>${preview}</b>`
-    })
-
-    // Apply UI refresh when leaving the field (safe for focus).
-    mpCustom.addEventListener('blur', () => {
-      massPermCustomPrefix = mpCustom.value
       renderMassPerm()
     })
 
@@ -1337,18 +1366,10 @@ export function initApp(root: HTMLElement): void {
     })
 
     mpPlay.addEventListener('click', () => {
-      if (selectedIsCustom) {
-        const prefix = massPermCustomPrefix.trim()
-        if (!prefix) {
-          setMassPermStatus('Enter a command prefix first (e.g. /np, !np, /p 100).')
-          return
-        }
-      } else {
-        const resolved = normalizeCategorySelection(massPermCategoryCode)
-        if (!resolved.number) {
-          setMassPermStatus('Invalid category number.')
-          return
-        }
+      const resolved = normalizeCategorySelection(massPermCategoryCode)
+      if (!resolved.number) {
+        setMassPermStatus('Invalid category number.')
+        return
       }
       if (!massPermMapcodes.length) {
         setMassPermStatus('No maps loaded.')
@@ -1375,13 +1396,14 @@ export function initApp(root: HTMLElement): void {
         const mc = massPermMapcodes[massPermIndex]!
         massPermInFlight = true
         try {
-          const isCustom = massPermCategoryCode === '__custom__'
-          if (isCustom) {
-            await massPermSendCustom(mc, massPermCustomPrefix, 'auto')
-          } else {
-            const resolved = normalizeCategorySelection(massPermCategoryCode)
-            await massPermSendPerm(mc, resolved.number!, 'auto')
+          const resolved = normalizeCategorySelection(massPermCategoryCode)
+          if (!resolved.number) {
+            setMassPermStatus('Invalid category number.')
+            stopMassPerm()
+            renderMassPerm()
+            return
           }
+          await massPermSendPerm(mc, resolved.number, 'auto')
           massPermLastSentIndex = massPermIndex
           massPermIndex += 1
         } finally {
@@ -1400,6 +1422,35 @@ export function initApp(root: HTMLElement): void {
       renderMassPerm()
     })
 
+    mpPrev.addEventListener('click', async () => {
+      if (massPermInFlight) return
+      if (massPermRunning) {
+        setMassPermStatus('Pause first to go back.')
+        return
+      }
+      if (massPermIndex <= 0) {
+        setMassPermStatus('Already at the first map.')
+        return
+      }
+      const resolved = normalizeCategorySelection(massPermCategoryCode)
+      if (!resolved.number) {
+        setMassPermStatus('Invalid category number.')
+        return
+      }
+      const idx = massPermIndex - 1
+      const mc = massPermMapcodes[idx]
+      if (!mc) {
+        setMassPermStatus('No map to apply.')
+        return
+      }
+      massPermInFlight = true
+      await massPermSendPerm(mc, resolved.number, 'manual')
+      massPermLastSentIndex = idx
+      massPermIndex = idx
+      massPermInFlight = false
+      renderMassPerm()
+    })
+
     mpCancel.addEventListener('click', () => {
       if (!canCancelToHome) {
         setMassPermStatus('Pause first to cancel.')
@@ -1410,18 +1461,10 @@ export function initApp(root: HTMLElement): void {
 
     mpNext.addEventListener('click', async () => {
       if (massPermInFlight) return
-      if (selectedIsCustom) {
-        const prefix = massPermCustomPrefix.trim()
-        if (!prefix) {
-          setMassPermStatus('Enter a command prefix first (e.g. /np, !np, /p 100).')
-          return
-        }
-      } else {
-        const resolved = normalizeCategorySelection(massPermCategoryCode)
-        if (!resolved.number) {
-          setMassPermStatus('Invalid category number.')
-          return
-        }
+      const resolved = normalizeCategorySelection(massPermCategoryCode)
+      if (!resolved.number) {
+        setMassPermStatus('Invalid category number.')
+        return
       }
       if (!massPermMapcodes.length) {
         setMassPermStatus('No maps loaded.')
@@ -1441,12 +1484,7 @@ export function initApp(root: HTMLElement): void {
       }
 
       massPermInFlight = true
-      if (selectedIsCustom) {
-        await massPermSendCustom(mc, massPermCustomPrefix, 'manual')
-      } else {
-        const resolved = normalizeCategorySelection(massPermCategoryCode)
-        await massPermSendPerm(mc, resolved.number!, 'manual')
-      }
+      await massPermSendPerm(mc, resolved.number, 'manual')
       massPermLastSentIndex = idx
       massPermIndex = idx + 1
       massPermInFlight = false
@@ -1454,12 +1492,366 @@ export function initApp(root: HTMLElement): void {
     })
   }
 
+  function renderCustomCommand(): void {
+    const previewMap = customCmdMapcodes[customCmdIndex] ?? customCmdMapcodes[0] ?? '@mapcode'
+    const preview = buildCustomCommandPreview(customCmdPrefix, customCmdSuffix, previewMap)
+
+    const total = customCmdMapcodes.length
+    const done = Math.min(customCmdIndex, total)
+    const current = customCmdMapcodes[customCmdIndex] ?? null
+    const last = customCmdLastSentIndex != null ? customCmdMapcodes[customCmdLastSentIndex] ?? null : null
+    const canManualNav = !customCmdRunning && !customCmdInFlight
+    const hkLabel = massPermHotkeysEnabled ? 'enabled' : 'disabled'
+    const mpKeys = state.settings.massPermHotkeys
+    const intervalLabel = `${customCmdIntervalSec.toFixed(1)}s`
+    const intervalOptions = Array.from({ length: 10 }, (_, i) => (i + 1) / 10).map((v) => {
+      const label = `${v.toFixed(1)}s`
+      const selected = Math.abs(v - customCmdIntervalSec) < 0.0001 ? 'selected' : ''
+      return `<option value="${v.toFixed(1)}" ${selected}>${label}</option>`
+    })
+
+    els.customCommand.innerHTML = `
+      <div class="wizardCard">
+        <div class="wizardHeader">
+          <div>
+            <div class="wizardTitle">Custom command</div>
+            <div class="wizardHint">Sends commands every <b>${intervalLabel}</b> to the active window.</div>
+          </div>
+        </div>
+
+        <div class="wizardBody">
+          <div class="row">
+            <label class="field">
+              <span>Prefix</span>
+              <input id="ccPrefix" class="textarea" style="min-height:auto; height:34px; padding:6px 10px;" placeholder="e.g. /np or !np or /p 100" />
+            </label>
+            <label class="field">
+              <span>Suffix (optional)</span>
+              <input id="ccSuffix" class="textarea" style="min-height:auto; height:34px; padding:6px 10px;" placeholder="e.g. #note or | tag" />
+            </label>
+            <div class="wizardHint">Preview: <b>${preview}</b></div>
+          </div>
+
+          <div class="kv">
+            <div class="k">Map list</div>
+            <textarea id="ccTextarea" class="textarea" rows="6" placeholder="Paste mapcodes here (one per line)"></textarea>
+            <div class="row">
+              <button class="btn primary" id="ccAddTextarea">Load from textarea</button>
+              <button class="btn" id="ccFromClipboard">Load from clipboard</button>
+              <button class="btn" id="ccFromFile">Import file</button>
+              <button class="btn danger" id="ccClearList">Clear list</button>
+            </div>
+            <div class="status" id="ccStatus"></div>
+          </div>
+
+          <div class="kv">
+            <div class="k">Progress</div>
+            <div class="v mono">Done: ${done}/${total}</div>
+            <div class="v mono">Current: ${current ? `@${current}` : '—'}</div>
+            <div class="v mono">Last: ${last ? `@${last}` : '—'}</div>
+          </div>
+
+          <label class="field">
+            <span>Interval</span>
+            <select id="ccInterval">
+              ${intervalOptions.join('')}
+            </select>
+          </label>
+
+          <label class="field checkbox">
+            <input id="ccHotkeys" type="checkbox" ${massPermHotkeysEnabled ? 'checked' : ''} />
+            <span>Enable hotkeys (play: ${mpKeys.play}, pause: ${mpKeys.pause}, next: ${mpKeys.next}, back: ${mpKeys.prev})</span>
+          </label>
+
+          <div class="row">
+            <button class="btn primary" id="ccPlay" title="Hotkey: ${mpKeys.play} (${hkLabel})">${customCmdRunning ? 'Running…' : 'Play / Resume'}</button>
+            <button class="btn" id="ccPause" title="Hotkey: ${mpKeys.pause} (${hkLabel})">Pause</button>
+            <button class="btn" id="ccPrev" title="Hotkey: ${mpKeys.prev} (${hkLabel})" ${canManualNav ? '' : 'disabled'}>Back</button>
+            <button class="btn" id="ccNext" title="Hotkey: ${mpKeys.next} (${hkLabel})" ${canManualNav ? '' : 'disabled'}>Next map</button>
+            <button class="btn danger" id="ccCancel" ${canManualNav ? '' : 'disabled'}>Cancel</button>
+            <button class="btn" id="ccHotkeysConfig">Config hotkeys</button>
+          </div>
+        </div>
+      </div>
+    `
+
+    const ccPrefix = els.customCommand.querySelector<HTMLInputElement>('#ccPrefix')!
+    const ccSuffix = els.customCommand.querySelector<HTMLInputElement>('#ccSuffix')!
+    const ccTextarea = els.customCommand.querySelector<HTMLTextAreaElement>('#ccTextarea')!
+    const ccAddTextarea = els.customCommand.querySelector<HTMLButtonElement>('#ccAddTextarea')!
+    const ccFromClipboard = els.customCommand.querySelector<HTMLButtonElement>('#ccFromClipboard')!
+    const ccFromFile = els.customCommand.querySelector<HTMLButtonElement>('#ccFromFile')!
+    const ccClearList = els.customCommand.querySelector<HTMLButtonElement>('#ccClearList')!
+    const ccPlay = els.customCommand.querySelector<HTMLButtonElement>('#ccPlay')!
+    const ccPause = els.customCommand.querySelector<HTMLButtonElement>('#ccPause')!
+    const ccPrev = els.customCommand.querySelector<HTMLButtonElement>('#ccPrev')!
+    const ccNext = els.customCommand.querySelector<HTMLButtonElement>('#ccNext')!
+    const ccCancel = els.customCommand.querySelector<HTMLButtonElement>('#ccCancel')!
+    const ccHotkeys = els.customCommand.querySelector<HTMLInputElement>('#ccHotkeys')!
+    const ccInterval = els.customCommand.querySelector<HTMLSelectElement>('#ccInterval')!
+    const ccHotkeysConfig = els.customCommand.querySelector<HTMLButtonElement>('#ccHotkeysConfig')!
+
+    ccPrefix.value = customCmdPrefix
+    ccSuffix.value = customCmdSuffix
+    ccInterval.value = customCmdIntervalSec.toFixed(1)
+
+    const updatePreview = () => {
+      customCmdPrefix = ccPrefix.value
+      customCmdSuffix = ccSuffix.value
+      renderCustomCommand()
+    }
+
+    ccPrefix.addEventListener('blur', () => updatePreview())
+    ccSuffix.addEventListener('blur', () => updatePreview())
+
+    ccHotkeys.addEventListener('change', async () => {
+      massPermHotkeysEnabled = ccHotkeys.checked
+      try {
+        await applyMassPermHotkeysConfig(massPermHotkeysEnabled)
+        setCustomCommandStatus(`Hotkeys ${massPermHotkeysEnabled ? 'enabled' : 'disabled'}.`)
+      } catch (e) {
+        setCustomCommandStatus(`Failed to toggle hotkeys: ${String(e)}`)
+        massPermHotkeysEnabled = !massPermHotkeysEnabled
+      }
+      renderCustomCommand()
+    })
+
+    ccHotkeysConfig.addEventListener('click', () => {
+      openHotkeysModal('mass_perm')
+    })
+
+    ccInterval.addEventListener('change', () => {
+      const next = Number.parseFloat(ccInterval.value)
+      if (!Number.isFinite(next)) return
+      const clamped = Math.max(0.1, Math.min(1.0, Math.round(next * 10) / 10))
+      customCmdIntervalSec = clamped
+
+      if (customCmdRunning) {
+        if (customCmdTimer) {
+          window.clearInterval(customCmdTimer)
+          customCmdTimer = null
+        }
+
+        const intervalMs = Math.round(customCmdIntervalSec * 1000)
+        customCmdTimer = window.setInterval(async () => {
+          if (customCmdInFlight) return
+          if (!customCmdRunning) return
+          if (customCmdIndex >= customCmdMapcodes.length) {
+            stopCustomCommand()
+            setCustomCommandStatus('Done.')
+            renderCustomCommand()
+            return
+          }
+
+          const mc = customCmdMapcodes[customCmdIndex]!
+          const prefix = customCmdPrefix.trim()
+          if (!prefix) {
+            setCustomCommandStatus('Enter a prefix first.')
+            stopCustomCommand()
+            renderCustomCommand()
+            return
+          }
+          customCmdInFlight = true
+          try {
+            await customCommandSend(mc, prefix, customCmdSuffix, 'auto')
+            customCmdLastSentIndex = customCmdIndex
+            customCmdIndex += 1
+          } finally {
+            customCmdInFlight = false
+            renderCustomCommand()
+          }
+        }, intervalMs)
+      }
+
+      renderCustomCommand()
+    })
+
+    ccAddTextarea.addEventListener('click', () => {
+      stopCustomCommand()
+      const list = extractMapcodesFromTextOrSessionJson(ccTextarea.value)
+      customCmdMapcodes = uniqPreserveOrder(list)
+      customCmdIndex = 0
+      customCmdLastSentIndex = null
+      setCustomCommandStatus(`Loaded ${customCmdMapcodes.length} map(s) from textarea.`)
+      renderCustomCommand()
+    })
+
+    ccFromClipboard.addEventListener('click', async () => {
+      stopCustomCommand()
+      const txt = await readClipboardText()
+      if (!txt) {
+        setCustomCommandStatus('Clipboard is empty (or has no text).')
+        return
+      }
+      const list = extractMapcodesFromTextOrSessionJson(txt)
+      customCmdMapcodes = uniqPreserveOrder(list)
+      customCmdIndex = 0
+      customCmdLastSentIndex = null
+      setCustomCommandStatus(`Loaded ${customCmdMapcodes.length} map(s) from clipboard.`)
+      renderCustomCommand()
+    })
+
+    ccFromFile.addEventListener('click', async () => {
+      stopCustomCommand()
+      const path = await openImportFileDialog()
+      if (!path) return
+      const txt = await readTextFileFromPath(path)
+      const list = extractMapcodesFromTextOrSessionJson(txt)
+      customCmdMapcodes = uniqPreserveOrder(list)
+      customCmdIndex = 0
+      customCmdLastSentIndex = null
+      setCustomCommandStatus(`Loaded ${customCmdMapcodes.length} map(s) from file.`)
+      renderCustomCommand()
+    })
+
+    ccClearList.addEventListener('click', () => {
+      stopCustomCommand()
+      customCmdMapcodes = []
+      customCmdIndex = 0
+      customCmdLastSentIndex = null
+      setCustomCommandStatus('Cleared.')
+      renderCustomCommand()
+    })
+
+    ccPlay.addEventListener('click', () => {
+      const prefix = customCmdPrefix.trim()
+      if (!prefix) {
+        setCustomCommandStatus('Enter a prefix first (e.g. /np, !np, /p 100).')
+        return
+      }
+      if (!customCmdMapcodes.length) {
+        setCustomCommandStatus('No maps loaded.')
+        return
+      }
+      if (customCmdIndex >= customCmdMapcodes.length) {
+        setCustomCommandStatus('Already finished. Press Cancel to reset or load a new list.')
+        return
+      }
+      if (customCmdRunning) return
+
+      customCmdRunning = true
+      const intervalMs = Math.round(customCmdIntervalSec * 1000)
+      customCmdTimer = window.setInterval(async () => {
+        if (customCmdInFlight) return
+        if (!customCmdRunning) return
+        if (customCmdIndex >= customCmdMapcodes.length) {
+          stopCustomCommand()
+          setCustomCommandStatus('Done.')
+          renderCustomCommand()
+          return
+        }
+
+        const mc = customCmdMapcodes[customCmdIndex]!
+        customCmdInFlight = true
+        try {
+          await customCommandSend(mc, prefix, customCmdSuffix, 'auto')
+          customCmdLastSentIndex = customCmdIndex
+          customCmdIndex += 1
+        } finally {
+          customCmdInFlight = false
+          renderCustomCommand()
+        }
+      }, intervalMs)
+
+      renderCustomCommand()
+      setCustomCommandStatus('Running… focus the game window.')
+    })
+
+    ccPause.addEventListener('click', () => {
+      stopCustomCommand()
+      setCustomCommandStatus('Paused.')
+      renderCustomCommand()
+    })
+
+    ccPrev.addEventListener('click', async () => {
+      if (customCmdInFlight) return
+      if (customCmdRunning) {
+        setCustomCommandStatus('Pause first to go back.')
+        return
+      }
+      if (customCmdIndex <= 0) {
+        setCustomCommandStatus('Already at the first map.')
+        return
+      }
+      const prefix = customCmdPrefix.trim()
+      if (!prefix) {
+        setCustomCommandStatus('Enter a prefix first.')
+        return
+      }
+      const idx = customCmdIndex - 1
+      const mc = customCmdMapcodes[idx]
+      if (!mc) {
+        setCustomCommandStatus('No map to apply.')
+        return
+      }
+      customCmdInFlight = true
+      await customCommandSend(mc, prefix, customCmdSuffix, 'manual')
+      customCmdLastSentIndex = idx
+      customCmdIndex = idx
+      customCmdInFlight = false
+      renderCustomCommand()
+    })
+
+    ccNext.addEventListener('click', async () => {
+      if (customCmdInFlight) return
+      const prefix = customCmdPrefix.trim()
+      if (!prefix) {
+        setCustomCommandStatus('Enter a prefix first.')
+        return
+      }
+      if (!customCmdMapcodes.length) {
+        setCustomCommandStatus('No maps loaded.')
+        return
+      }
+      if (customCmdIndex >= customCmdMapcodes.length) {
+        setCustomCommandStatus('Done.')
+        return
+      }
+
+      const idx = customCmdIndex
+      const mc = customCmdMapcodes[idx]
+      if (!mc) {
+        setCustomCommandStatus('No map to apply.')
+        return
+      }
+
+      customCmdInFlight = true
+      await customCommandSend(mc, prefix, customCmdSuffix, 'manual')
+      customCmdLastSentIndex = idx
+      customCmdIndex = idx + 1
+      customCmdInFlight = false
+      renderCustomCommand()
+    })
+
+    ccCancel.addEventListener('click', () => {
+      if (!canManualNav) {
+        setCustomCommandStatus('Pause first to cancel.')
+        return
+      }
+      resetCustomCommandData()
+      els.customCommand.style.display = 'none'
+      openLauncher({ allowReturnToSession: Boolean(state.session) })
+      setCustomCommandStatus('Custom command cancelled.')
+    })
+  }
+
+  function openCustomCommand(): void {
+    els.customCommand.style.display = 'grid'
+    els.massPerm.style.display = 'none'
+    renderCustomCommand()
+    setCustomCommandStatus('Load a list and enter a prefix.')
+    void applyMassPermHotkeysConfig(massPermHotkeysEnabled).catch(() => {
+      // best effort
+    })
+  }
+
   function openMassPerm(): void {
     els.massPerm.style.display = 'grid'
+    els.customCommand.style.display = 'none'
     // mass perm pode rodar sem sessão; não força mostrar o shell
     renderMassPerm()
     setMassPermStatus('Load a list and choose a category.')
-    void setMassPermHotkeysEnabled(massPermHotkeysEnabled).catch(() => {
+    void applyMassPermHotkeysConfig(massPermHotkeysEnabled).catch(() => {
       // best effort
     })
   }
@@ -1851,6 +2243,8 @@ export function initApp(root: HTMLElement): void {
     els.commandMode.value = state.settings.commandMode
     els.dedupe.checked = state.settings.dedupe
     els.autoCapture.checked = state.settings.autoCaptureClipboard
+    const reviewLabel = els.reviewHotkeys.closest('label')
+    if (reviewLabel) reviewLabel.title = getReviewHotkeysTitle()
     renderQueue()
     renderDetails()
   }
@@ -1861,6 +2255,260 @@ export function initApp(root: HTMLElement): void {
     if (typeof next.commandMode === 'string') {
       syncNp()
     }
+  }
+
+  function normalizeHotkeyValue(value: string): string {
+    return value.trim()
+  }
+
+  function formatHotkeyError(reason: string): string {
+    return `Hotkeys: ${reason}`
+  }
+
+  function validateHotkeySet(values: string[]): string | null {
+    const normalized = values.map((v) => v.trim()).filter(Boolean)
+    if (normalized.length !== values.length) {
+      return 'fill in all hotkey fields.'
+    }
+    return null
+  }
+
+  async function applyReviewHotkeysConfig(): Promise<void> {
+    const hk = state.settings.reviewHotkeys
+    await registerHotkeys({
+      loadCurrent: hk.loadCurrent,
+      prevMap: hk.prevMap,
+      nextMap: hk.nextMap,
+      replayCurrent: hk.replayCurrent,
+    })
+  }
+
+  async function applyMassPermHotkeysConfig(enabled: boolean): Promise<void> {
+    const hk = state.settings.massPermHotkeys
+    await setMassPermHotkeysConfig({
+      enabled,
+      hotkeys: {
+        play: hk.play,
+        pause: hk.pause,
+        next: hk.next,
+        prev: hk.prev,
+      },
+    })
+  }
+
+  function getReviewHotkeysTitle(): string {
+    const hk = state.settings.reviewHotkeys
+    return `Global hotkeys: ${hk.loadCurrent} = load | ${hk.prevMap} = prev+load | ${hk.nextMap} = next+load | ${hk.replayCurrent} = replay`
+  }
+
+  function openHotkeysModal(kind: 'review' | 'mass_perm'): void {
+    const isReview = kind === 'review'
+    const title = isReview ? 'Review hotkeys' : 'Mass perm hotkeys'
+    const reviewCurrent = state.settings.reviewHotkeys
+    const massCurrent = state.settings.massPermHotkeys
+    const prevReviewEnabled = state.settings.reviewHotkeysEnabled
+    const prevMassPermEnabled = massPermHotkeysEnabled
+    const groupFields = isReview
+      ? [
+          { id: 'loadCurrent', label: 'Load current', value: reviewCurrent.loadCurrent },
+          { id: 'prevMap', label: 'Prev + load', value: reviewCurrent.prevMap },
+          { id: 'nextMap', label: 'Next + load', value: reviewCurrent.nextMap },
+          { id: 'replayCurrent', label: 'Replay current', value: reviewCurrent.replayCurrent },
+        ]
+      : [
+          { id: 'play', label: 'Play / Resume', value: massCurrent.play },
+          { id: 'pause', label: 'Pause', value: massCurrent.pause },
+          { id: 'prev', label: 'Back', value: massCurrent.prev },
+          { id: 'next', label: 'Next', value: massCurrent.next },
+        ]
+
+    const stateMap = new Map(groupFields.map((f) => [f.id, f.value]))
+    let captureTarget: string | null = null
+
+    els.hotkeysModal.style.display = 'grid'
+    els.hotkeysModal.style.zIndex = '1200'
+    els.hotkeysModal.innerHTML = `
+      <div class="wizardCard">
+        <div class="wizardHeader">
+          <div>
+            <div class="wizardTitle">${title}</div>
+            <div class="wizardHint">Click “Change key” and press the next hotkey.</div>
+          </div>
+        </div>
+        <div class="wizardBody">
+          ${groupFields
+            .map(
+              (f) => `
+                <div class="row" style="justify-content: space-between; align-items: center;">
+                  <div class="field" style="flex: 1;">
+                    <span>${f.label}</span>
+                    <span class="mono" id="hk_val_${f.id}">${f.value}</span>
+                  </div>
+                  <button class="btn" id="hk_capture_${f.id}">Change key</button>
+                </div>
+              `,
+            )
+            .join('')}
+          <div class="status" id="hkStatus"></div>
+        </div>
+        <div class="wizardFooter">
+          <div class="wizardFooterLeft">
+            <button class="btn" id="hkCancel">Cancel</button>
+          </div>
+          <div class="wizardFooterRight">
+            <button class="btn primary" id="hkSave">Save</button>
+          </div>
+        </div>
+      </div>
+    `
+
+    const statusEl = els.hotkeysModal.querySelector<HTMLDivElement>('#hkStatus')!
+    const cancelBtn = els.hotkeysModal.querySelector<HTMLButtonElement>('#hkCancel')!
+    const saveBtn = els.hotkeysModal.querySelector<HTMLButtonElement>('#hkSave')!
+
+    const updateLabel = (id: string) => {
+      const el = els.hotkeysModal.querySelector<HTMLSpanElement>(`#hk_val_${id}`)
+      if (el) el.textContent = stateMap.get(id) ?? ''
+    }
+
+    const setCaptureTarget = (id: string | null) => {
+      captureTarget = id
+      statusEl.textContent = id ? 'Press a key combination…' : ''
+    }
+
+    const toHotkeyString = (ev: KeyboardEvent): string | null => {
+      const key = ev.key
+      if (key === 'Control' || key === 'Shift' || key === 'Alt' || key === 'Meta') return null
+      const parts: string[] = []
+      if (ev.ctrlKey) parts.push('Ctrl')
+      if (ev.altKey) parts.push('Alt')
+      if (ev.shiftKey) parts.push('Shift')
+      if (ev.metaKey) parts.push('Meta')
+
+      let base = key
+      if (base === ' ') base = 'Space'
+      if (base.length === 1) base = base.toUpperCase()
+      parts.push(base)
+      return parts.join('+')
+    }
+
+    const onKeydown = (ev: KeyboardEvent) => {
+      if (!captureTarget) return
+      ev.preventDefault()
+      ev.stopPropagation()
+      const hotkey = toHotkeyString(ev)
+      if (!hotkey) return
+
+      // Clear duplicates within the same group
+      for (const [id, val] of stateMap.entries()) {
+        if (id !== captureTarget && val.trim().toLowerCase() === hotkey.trim().toLowerCase()) {
+          stateMap.set(id, '')
+          updateLabel(id)
+        }
+      }
+      stateMap.set(captureTarget, hotkey)
+      updateLabel(captureTarget)
+      setCaptureTarget(null)
+    }
+
+    for (const f of groupFields) {
+      const btn = els.hotkeysModal.querySelector<HTMLButtonElement>(`#hk_capture_${f.id}`)!
+      btn.addEventListener('click', () => setCaptureTarget(f.id))
+      updateLabel(f.id)
+    }
+
+    const close = () => {
+      els.hotkeysModal.style.display = 'none'
+      els.hotkeysModal.innerHTML = ''
+      document.removeEventListener('keydown', onKeydown, true)
+      if (prevReviewEnabled !== state.settings.reviewHotkeysEnabled) {
+        updateSettings({ reviewHotkeysEnabled: prevReviewEnabled })
+        void setReviewHotkeysEnabled(prevReviewEnabled).catch(() => {
+          // best effort
+        })
+        if (els.reviewHotkeys) els.reviewHotkeys.checked = prevReviewEnabled
+      }
+      if (prevMassPermEnabled !== massPermHotkeysEnabled) {
+        massPermHotkeysEnabled = prevMassPermEnabled
+        void applyMassPermHotkeysConfig(prevMassPermEnabled).catch(() => {
+          // best effort
+        })
+        renderMassPerm()
+        renderCustomCommand()
+      }
+    }
+
+    cancelBtn.addEventListener('click', () => close())
+    saveBtn.addEventListener('click', async () => {
+      const next: Record<string, string> = {}
+      for (const f of groupFields) {
+        next[f.id] = normalizeHotkeyValue(stateMap.get(f.id) ?? '')
+      }
+
+      const values = groupFields.map((f) => next[f.id])
+      const err = validateHotkeySet(values)
+      if (err) {
+        statusEl.textContent = formatHotkeyError(err)
+        return
+      }
+
+      try {
+        if (isReview) {
+          const updated = {
+            loadCurrent: next.loadCurrent,
+            prevMap: next.prevMap,
+            nextMap: next.nextMap,
+            replayCurrent: next.replayCurrent,
+          }
+          await registerHotkeys(updated)
+          updateSettings({ reviewHotkeys: updated })
+          const reviewLabel = els.reviewHotkeys.closest('label')
+          if (reviewLabel) reviewLabel.title = getReviewHotkeysTitle()
+        } else {
+          const updated = {
+            play: next.play,
+            pause: next.pause,
+            next: next.next,
+            prev: next.prev,
+          }
+          await setMassPermHotkeysConfig({ enabled: massPermHotkeysEnabled, hotkeys: updated })
+          updateSettings({ massPermHotkeys: updated })
+          if (els.massPerm.style.display === 'grid') {
+            renderMassPerm()
+          }
+          if (els.customCommand.style.display === 'grid') {
+            renderCustomCommand()
+          }
+        }
+        close()
+      } catch (e) {
+        statusEl.textContent = formatHotkeyError(String(e))
+      }
+    })
+
+    // Disable hotkeys while capturing to avoid interference
+    if (state.settings.reviewHotkeysEnabled) {
+      updateSettings({ reviewHotkeysEnabled: false })
+      void setReviewHotkeysEnabled(false).catch(() => {
+        // best effort
+      })
+      if (els.reviewHotkeys) els.reviewHotkeys.checked = false
+    }
+    if (massPermHotkeysEnabled) {
+      massPermHotkeysEnabled = false
+      void applyMassPermHotkeysConfig(false).catch(() => {
+        // best effort
+      })
+      if (els.massPerm.style.display === 'grid') {
+        renderMassPerm()
+      }
+      if (els.customCommand.style.display === 'grid') {
+        renderCustomCommand()
+      }
+    }
+
+    document.addEventListener('keydown', onKeydown, true)
+    els.hotkeysModal.focus?.()
   }
 
   async function playSelected(sourceLabel: string): Promise<void> {
@@ -1894,6 +2542,9 @@ export function initApp(root: HTMLElement): void {
     void setReviewHotkeysEnabled(enabled).catch(() => {
       // best effort
     })
+  })
+  els.reviewHotkeysConfig.addEventListener('click', () => {
+    openHotkeysModal('review')
   })
   els.showIgnored.addEventListener('change', () => {
     updateSettings({ showIgnoredInQueue: els.showIgnored.checked })
@@ -2122,7 +2773,7 @@ export function initApp(root: HTMLElement): void {
     openMassPerm()
   })
 
-  type LauncherMode = 'session' | 'mass_perm'
+  type LauncherMode = 'session' | 'mass_perm' | 'custom_command'
 
   function renderWizard(
     step: 0 | 1 | 2 | 3,
@@ -2178,6 +2829,10 @@ export function initApp(root: HTMLElement): void {
         <button class="methodTile ${selectedMode === 'mass_perm' ? 'selected' : ''}" data-launch="mass_perm">
           <div class="methodTitle">Start a mass perm</div>
           <div class="wizardHint">Change category using <b>/p &lt;n&gt; @mapcode</b> at 0.25s intervals.</div>
+        </button>
+        <button class="methodTile ${selectedMode === 'custom_command' ? 'selected' : ''}" data-launch="custom_command">
+          <div class="methodTitle">Start a custom command</div>
+          <div class="wizardHint">Send <b>&lt;prefix&gt; @mapcode &lt;suffix&gt;</b> at fixed intervals.</div>
         </button>
       </div>
     `
@@ -2283,14 +2938,15 @@ export function initApp(root: HTMLElement): void {
       const prevBtn = els.wizard.querySelector<HTMLButtonElement>('#wizPrev')!
       const nextBtn = els.wizard.querySelector<HTMLButtonElement>('#wizNextCarousel')!
 
-      const toggleMode = (m?: LauncherMode) => {
-        const nextMode: LauncherMode =
-          m ?? (selectedMode === 'session' ? 'mass_perm' : 'session')
+      const toggleMode = (m?: LauncherMode, dir = 1) => {
+        const modes: LauncherMode[] = ['session', 'mass_perm', 'custom_command']
+        const idx = Math.max(0, modes.indexOf(selectedMode))
+        const nextMode: LauncherMode = m ?? modes[(idx + dir + modes.length) % modes.length]!
         renderWizard(0, selectedCategory, selectedMethod, nextMode)
       }
 
-      prevBtn.addEventListener('click', () => toggleMode())
-      nextBtn.addEventListener('click', () => toggleMode())
+      prevBtn.addEventListener('click', () => toggleMode(undefined, -1))
+      nextBtn.addEventListener('click', () => toggleMode(undefined, 1))
 
       for (const btn of Array.from(els.wizard.querySelectorAll<HTMLButtonElement>('button[data-launch]'))) {
         btn.addEventListener('click', () => {
@@ -2310,6 +2966,12 @@ export function initApp(root: HTMLElement): void {
           launcherAllowReturnToSession = false
           // se não existe sessão, continuamos com o shell oculto
           openMassPerm()
+          return
+        }
+        if (selectedMode === 'custom_command') {
+          els.wizard.style.display = 'none'
+          launcherAllowReturnToSession = false
+          openCustomCommand()
           return
         }
         renderWizard(1, selectedCategory, selectedMethod, selectedMode)
@@ -2413,6 +3075,8 @@ export function initApp(root: HTMLElement): void {
 
   function openLauncher(opts?: { allowReturnToSession?: boolean }): void {
     els.wizard.style.display = 'grid'
+    els.massPerm.style.display = 'none'
+    els.customCommand.style.display = 'none'
     launcherAllowReturnToSession = Boolean(opts?.allowReturnToSession && state.session)
     // Se não há sessão ativa, não mostrar a página vazia ao fundo
     setShellVisible(Boolean(state.session))
@@ -2521,7 +3185,7 @@ export function initApp(root: HTMLElement): void {
   void hydrateAppVersion()
 
   // hotkeys globais (best effort)
-  void registerHotkeys().catch(() => {
+  void applyReviewHotkeysConfig().catch(() => {
     // best effort
   })
   // aplica estado salvo das hotkeys de review (best effort)
@@ -2550,26 +3214,58 @@ export function initApp(root: HTMLElement): void {
 
   // hotkeys globais do mass perm (best effort)
   void onHotkeyMassPermPlay(() => {
-    if (els.massPerm.style.display !== 'grid') return
     if (!massPermHotkeysEnabled) return
-    const btn = els.massPerm.querySelector<HTMLButtonElement>('#mpPlay')
-    btn?.click()
+    if (els.customCommand.style.display === 'grid') {
+      const btn = els.customCommand.querySelector<HTMLButtonElement>('#ccPlay')
+      btn?.click()
+      return
+    }
+    if (els.massPerm.style.display === 'grid') {
+      const btn = els.massPerm.querySelector<HTMLButtonElement>('#mpPlay')
+      btn?.click()
+    }
   }).catch(() => {
     // best effort
   })
   void onHotkeyMassPermPause(() => {
-    if (els.massPerm.style.display !== 'grid') return
     if (!massPermHotkeysEnabled) return
-    const btn = els.massPerm.querySelector<HTMLButtonElement>('#mpPause')
-    btn?.click()
+    if (els.customCommand.style.display === 'grid') {
+      const btn = els.customCommand.querySelector<HTMLButtonElement>('#ccPause')
+      btn?.click()
+      return
+    }
+    if (els.massPerm.style.display === 'grid') {
+      const btn = els.massPerm.querySelector<HTMLButtonElement>('#mpPause')
+      btn?.click()
+    }
   }).catch(() => {
     // best effort
   })
   void onHotkeyMassPermNext(() => {
-    if (els.massPerm.style.display !== 'grid') return
     if (!massPermHotkeysEnabled) return
-    const btn = els.massPerm.querySelector<HTMLButtonElement>('#mpNext')
-    btn?.click()
+    if (els.customCommand.style.display === 'grid') {
+      const btn = els.customCommand.querySelector<HTMLButtonElement>('#ccNext')
+      btn?.click()
+      return
+    }
+    if (els.massPerm.style.display === 'grid') {
+      const btn = els.massPerm.querySelector<HTMLButtonElement>('#mpNext')
+      btn?.click()
+    }
+  }).catch(() => {
+    // best effort
+  })
+  void onHotkeyMassPermPrev(() => {
+    if (!massPermHotkeysEnabled) return
+    if (els.customCommand.style.display === 'grid') {
+      const btn = els.customCommand.querySelector<HTMLButtonElement>('#ccPrev')
+      btn?.click()
+      return
+    }
+    if (els.massPerm.style.display === 'grid') {
+      const btn = els.massPerm.querySelector<HTMLButtonElement>('#mpPrev')
+      btn?.click()
+    }
   }).catch(() => {
     // best effort
   })

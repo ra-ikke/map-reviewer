@@ -62,6 +62,7 @@ pub fn run() {
     mp_play: Mutex<Option<tauri_plugin_global_shortcut::Shortcut>>,
     mp_pause: Mutex<Option<tauri_plugin_global_shortcut::Shortcut>>,
     mp_next: Mutex<Option<tauri_plugin_global_shortcut::Shortcut>>,
+    mp_prev: Mutex<Option<tauri_plugin_global_shortcut::Shortcut>>,
     mp_enabled: AtomicBool,
     enabled: AtomicBool,
   }
@@ -76,6 +77,7 @@ pub fn run() {
         mp_play: Mutex::new(None),
         mp_pause: Mutex::new(None),
         mp_next: Mutex::new(None),
+        mp_prev: Mutex::new(None),
         mp_enabled: AtomicBool::new(false),
         enabled: AtomicBool::new(true),
       }
@@ -101,6 +103,22 @@ pub fn run() {
     prev_map: Option<String>,
     next_map: Option<String>,
     replay_current: Option<String>,
+  }
+
+  #[derive(Clone, serde::Deserialize, Debug)]
+  #[serde(rename_all = "camelCase")]
+  struct MassPermHotkeysArgs {
+    play: String,
+    pause: String,
+    next: String,
+    prev: String,
+  }
+
+  #[derive(Clone, serde::Deserialize, Debug)]
+  #[serde(rename_all = "camelCase")]
+  struct SetMassPermHotkeysArgs {
+    enabled: bool,
+    hotkeys: MassPermHotkeysArgs,
   }
 
   #[derive(Clone, serde::Deserialize, Debug)]
@@ -320,12 +338,19 @@ pub fn run() {
     let candidates: Vec<std::path::PathBuf> = {
       let mut v = Vec::new();
       if let Ok(cwd) = std::env::current_dir() {
+        // Primeiro tenta .env no cwd e no repo
+        v.push(cwd.join(".env"));
+        v.push(cwd.join("..").join(".env"));
+        v.push(cwd.join("..").join("maps-reviewer-desktop").join(".env"));
+        v.push(cwd.join("..").join("..").join("maps-reviewer-desktop").join(".env"));
         v.push(cwd.join("..").join("xero3.0").join(".env"));
         v.push(cwd.join("..").join("..").join("xero3.0").join(".env"));
         v.push(cwd.join("..").join("..").join("..").join("xero3.0").join(".env"));
       }
       if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
+          v.push(dir.join(".env"));
+          v.push(dir.join("..").join(".env"));
           v.push(dir.join("..").join("xero3.0").join(".env"));
           v.push(dir.join("..").join("..").join("xero3.0").join(".env"));
         }
@@ -802,6 +827,7 @@ pub fn run() {
     let mp_play = reg.mp_play.lock().map_err(|_| "hotkey lock poisoned")?.clone();
     let mp_pause = reg.mp_pause.lock().map_err(|_| "hotkey lock poisoned")?.clone();
     let mp_next = reg.mp_next.lock().map_err(|_| "hotkey lock poisoned")?.clone();
+    let mp_prev = reg.mp_prev.lock().map_err(|_| "hotkey lock poisoned")?.clone();
 
     // unregister (best effort)
     unregister_shortcut(app, &load);
@@ -811,6 +837,7 @@ pub fn run() {
     unregister_shortcut(app, &mp_play);
     unregister_shortcut(app, &mp_pause);
     unregister_shortcut(app, &mp_next);
+    unregister_shortcut(app, &mp_prev);
 
     *reg.load_current.lock().map_err(|_| "hotkey lock poisoned")? = None;
     *reg.prev_map.lock().map_err(|_| "hotkey lock poisoned")? = None;
@@ -819,6 +846,7 @@ pub fn run() {
     *reg.mp_play.lock().map_err(|_| "hotkey lock poisoned")? = None;
     *reg.mp_pause.lock().map_err(|_| "hotkey lock poisoned")? = None;
     *reg.mp_next.lock().map_err(|_| "hotkey lock poisoned")? = None;
+    *reg.mp_prev.lock().map_err(|_| "hotkey lock poisoned")? = None;
 
     Ok(())
   }
@@ -827,44 +855,71 @@ pub fn run() {
     let mp_play = reg.mp_play.lock().map_err(|_| "hotkey lock poisoned")?.clone();
     let mp_pause = reg.mp_pause.lock().map_err(|_| "hotkey lock poisoned")?.clone();
     let mp_next = reg.mp_next.lock().map_err(|_| "hotkey lock poisoned")?.clone();
+    let mp_prev = reg.mp_prev.lock().map_err(|_| "hotkey lock poisoned")?.clone();
     unregister_shortcut(app, &mp_play);
     unregister_shortcut(app, &mp_pause);
     unregister_shortcut(app, &mp_next);
+    unregister_shortcut(app, &mp_prev);
     *reg.mp_play.lock().map_err(|_| "hotkey lock poisoned")? = None;
     *reg.mp_pause.lock().map_err(|_| "hotkey lock poisoned")? = None;
     *reg.mp_next.lock().map_err(|_| "hotkey lock poisoned")? = None;
+    *reg.mp_prev.lock().map_err(|_| "hotkey lock poisoned")? = None;
     reg.mp_enabled.store(false, Ordering::SeqCst);
     Ok(())
   }
 
-  fn set_massperm_hotkeys_enabled(app: &tauri::AppHandle, reg: &HotkeyRegistry, enabled: bool) -> Result<(), String> {
+  fn set_massperm_hotkeys_enabled(
+    app: &tauri::AppHandle,
+    reg: &HotkeyRegistry,
+    enabled: bool,
+    hotkeys: &MassPermHotkeysArgs,
+  ) -> Result<(), String> {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
+    let play_accel = hotkeys.play.trim();
+    let pause_accel = hotkeys.pause.trim();
+    let next_accel = hotkeys.next.trim();
+    let prev_accel = hotkeys.prev.trim();
+
+    if play_accel.is_empty() || pause_accel.is_empty() || next_accel.is_empty() || prev_accel.is_empty() {
+      return Err("empty mass perm hotkey".to_string());
+    }
+
+    let mp_play = play_accel
+      .parse::<tauri_plugin_global_shortcut::Shortcut>()
+      .map_err(|_| format!("invalid hotkey (play): {play_accel}"))?;
+    let mp_pause = pause_accel
+      .parse::<tauri_plugin_global_shortcut::Shortcut>()
+      .map_err(|_| format!("invalid hotkey (pause): {pause_accel}"))?;
+    let mp_next = next_accel
+      .parse::<tauri_plugin_global_shortcut::Shortcut>()
+      .map_err(|_| format!("invalid hotkey (next): {next_accel}"))?;
+    let mp_prev = prev_accel
+      .parse::<tauri_plugin_global_shortcut::Shortcut>()
+      .map_err(|_| format!("invalid hotkey (prev): {prev_accel}"))?;
+
+    *reg.mp_play.lock().map_err(|_| "hotkey lock poisoned")? = Some(mp_play.clone());
+    *reg.mp_pause.lock().map_err(|_| "hotkey lock poisoned")? = Some(mp_pause.clone());
+    *reg.mp_next.lock().map_err(|_| "hotkey lock poisoned")? = Some(mp_next.clone());
+    *reg.mp_prev.lock().map_err(|_| "hotkey lock poisoned")? = Some(mp_prev.clone());
+
     if enabled {
-      // Remove conflitos (Insert e PageDown) dos hotkeys de sessão
-      let replay = reg.replay_current.lock().map_err(|_| "hotkey lock poisoned")?.clone();
+      // Remove conflitos entre hotkeys de sessão e mass perm
+      let load = reg.load_current.lock().map_err(|_| "hotkey lock poisoned")?.clone();
+      let prev = reg.prev_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
       let next = reg.next_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
-      unregister_shortcut(app, &replay);
-      unregister_shortcut(app, &next);
-
-      // Registra mass perm hotkeys
-      let mp_play = "Insert"
-        .parse::<tauri_plugin_global_shortcut::Shortcut>()
-        .map_err(|_| "invalid hotkey (Insert)".to_string())?;
-      let mp_pause = "Delete"
-        .parse::<tauri_plugin_global_shortcut::Shortcut>()
-        .map_err(|_| "invalid hotkey (Delete)".to_string())?;
-      let mp_next = "PageDown"
-        .parse::<tauri_plugin_global_shortcut::Shortcut>()
-        .map_err(|_| "invalid hotkey (PageDown)".to_string())?;
-
-      *reg.mp_play.lock().map_err(|_| "hotkey lock poisoned")? = Some(mp_play.clone());
-      *reg.mp_pause.lock().map_err(|_| "hotkey lock poisoned")? = Some(mp_pause.clone());
-      *reg.mp_next.lock().map_err(|_| "hotkey lock poisoned")? = Some(mp_next.clone());
+      let replay = reg.replay_current.lock().map_err(|_| "hotkey lock poisoned")?.clone();
+      let mp_list = vec![mp_play.clone(), mp_pause.clone(), mp_next.clone(), mp_prev.clone()];
+      for sc in [load, prev, next, replay].into_iter().flatten() {
+        if mp_list.iter().any(|x| x == &sc) {
+          unregister_shortcut(app, &Some(sc));
+        }
+      }
 
       app.global_shortcut().register(mp_play).map_err(|e| e.to_string())?;
       app.global_shortcut().register(mp_pause).map_err(|e| e.to_string())?;
       app.global_shortcut().register(mp_next).map_err(|e| e.to_string())?;
+      app.global_shortcut().register(mp_prev).map_err(|e| e.to_string())?;
 
       reg.mp_enabled.store(true, Ordering::SeqCst);
       let _ = app.emit("massperm_hotkeys_status", serde_json::json!({ "enabled": true }));
@@ -876,10 +931,18 @@ pub fn run() {
       if reg.enabled.load(Ordering::SeqCst) {
         let next = reg.next_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
         let replay = reg.replay_current.lock().map_err(|_| "hotkey lock poisoned")?.clone();
+        let prev = reg.prev_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
+        let load = reg.load_current.lock().map_err(|_| "hotkey lock poisoned")?.clone();
         if let Some(sc) = next {
           let _ = app.global_shortcut().register(sc);
         }
         if let Some(sc) = replay {
+          let _ = app.global_shortcut().register(sc);
+        }
+        if let Some(sc) = prev {
+          let _ = app.global_shortcut().register(sc);
+        }
+        if let Some(sc) = load {
           let _ = app.global_shortcut().register(sc);
         }
       }
@@ -1064,6 +1127,7 @@ pub fn run() {
   struct SendCustomArgs {
     mapcode: String,
     prefix: String,
+    suffix: Option<String>,
   }
 
   #[tauri::command]
@@ -1079,11 +1143,13 @@ pub fn run() {
       return Err("empty prefix".into());
     }
 
-    // Ensure a single space between prefix and @mapcode
-    let cmd = if prefix.ends_with(' ') {
-      format!("{prefix}@{mc}")
-    } else {
+    let suffix = args.suffix.unwrap_or_default();
+    let suffix = suffix.trim();
+
+    let cmd = if suffix.is_empty() {
       format!("{prefix} @{mc}")
+    } else {
+      format!("{prefix} @{mc} {suffix}")
     };
 
     type_in_active_window_and_enter(&cmd)?;
@@ -1134,18 +1200,27 @@ pub fn run() {
 
     // registra as demais conforme flag enabled (default: true)
     if reg.enabled.load(Ordering::SeqCst) {
+      let mp_play = reg.mp_play.lock().ok().and_then(|g| g.clone());
+      let mp_pause = reg.mp_pause.lock().ok().and_then(|g| g.clone());
+      let mp_next = reg.mp_next.lock().ok().and_then(|g| g.clone());
+      let mp_prev = reg.mp_prev.lock().ok().and_then(|g| g.clone());
+      let mp_list = [mp_play, mp_pause, mp_next, mp_prev];
+      let conflicts = |sc: &tauri_plugin_global_shortcut::Shortcut| {
+        mp_list.iter().flatten().any(|mp| mp == sc)
+      };
+
       app
         .global_shortcut()
-        .register(load_current)
+        .register(load_current.clone())
         .map_err(|e| e.to_string())?;
-      app.global_shortcut().register(prev_map).map_err(|e| e.to_string())?;
-      app.global_shortcut().register(next_map).map_err(|e| e.to_string())?;
-      // se mass perm estiver usando Insert/PageDown, não registra replay/next aqui
-      if !reg.mp_enabled.load(Ordering::SeqCst) {
-        app
-          .global_shortcut()
-          .register(replay_current)
-          .map_err(|e| e.to_string())?;
+      if !reg.mp_enabled.load(Ordering::SeqCst) || !conflicts(&prev_map) {
+        let _ = app.global_shortcut().register(prev_map.clone());
+      }
+      if !reg.mp_enabled.load(Ordering::SeqCst) || !conflicts(&next_map) {
+        let _ = app.global_shortcut().register(next_map.clone());
+      }
+      if !reg.mp_enabled.load(Ordering::SeqCst) || !conflicts(&replay_current) {
+        let _ = app.global_shortcut().register(replay_current.clone());
       }
     }
 
@@ -1167,9 +1242,9 @@ pub fn run() {
   fn set_massperm_hotkeys_enabled_cmd(
     app: tauri::AppHandle,
     reg: tauri::State<'_, HotkeyRegistry>,
-    enabled: bool,
+    args: SetMassPermHotkeysArgs,
   ) -> Result<(), String> {
-    set_massperm_hotkeys_enabled(&app, &reg, enabled)
+    set_massperm_hotkeys_enabled(&app, &reg, args.enabled, &args.hotkeys)
   }
 
   #[tauri::command]
@@ -1250,6 +1325,11 @@ pub fn run() {
             let mp_pause = reg.mp_pause.lock().ok().and_then(|g| g.clone());
             if mp_pause.as_ref() == Some(shortcut) {
               let _ = app.emit("hotkey_massperm_pause", ());
+              return;
+            }
+            let mp_prev = reg.mp_prev.lock().ok().and_then(|g| g.clone());
+            if mp_prev.as_ref() == Some(shortcut) {
+              let _ = app.emit("hotkey_massperm_prev", ());
               return;
             }
             let mp_next = reg.mp_next.lock().ok().and_then(|g| g.clone());

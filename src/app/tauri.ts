@@ -120,21 +120,36 @@ export async function sendPermToActiveWindow(args: { mapcode: string; categoryNu
   return await invoke<string>('send_perm_to_active_window', { args: { mapcode: args.mapcode, categoryNumber: args.categoryNumber } })
 }
 
-export async function sendCustomToActiveWindow(args: { mapcode: string; prefix: string }): Promise<string> {
-  return await invoke<string>('send_custom_to_active_window', { args: { mapcode: args.mapcode, prefix: args.prefix } })
+export async function sendCustomToActiveWindow(args: { mapcode: string; prefix: string; suffix?: string }): Promise<string> {
+  return await invoke<string>('send_custom_to_active_window', {
+    args: { mapcode: args.mapcode, prefix: args.prefix, suffix: args.suffix ?? null },
+  })
 }
 
-export async function setMassPermHotkeysEnabled(enabled: boolean): Promise<void> {
-  await invoke('set_massperm_hotkeys_enabled_cmd', { enabled })
+export async function setMassPermHotkeysConfig(args: {
+  enabled: boolean
+  hotkeys: { play: string; pause: string; next: string; prev: string }
+}): Promise<void> {
+  await invoke('set_massperm_hotkeys_enabled_cmd', { args })
 }
 
 export async function exportJsonToPath(path: string, payload: ExportPayloadV1): Promise<string> {
   return await invoke<string>('export_json', { path, payload })
 }
 
-export async function registerHotkeys(args?: { loadCurrent?: string }): Promise<void> {
-  const loadCurrent = args?.loadCurrent ?? 'Ctrl+Alt+L'
-  await invoke('register_hotkeys', { args: { loadCurrent } })
+export async function registerHotkeys(args?: {
+  loadCurrent?: string
+  prevMap?: string
+  nextMap?: string
+  replayCurrent?: string
+}): Promise<void> {
+  const payload = {
+    loadCurrent: args?.loadCurrent ?? 'Ctrl+Alt+L',
+    prevMap: args?.prevMap,
+    nextMap: args?.nextMap,
+    replayCurrent: args?.replayCurrent,
+  }
+  await invoke('register_hotkeys', { args: payload })
 }
 
 export async function setReviewHotkeysEnabled(enabled: boolean): Promise<void> {
@@ -151,6 +166,10 @@ export async function onHotkeyMassPermPause(cb: () => void): Promise<UnlistenFn>
 
 export async function onHotkeyMassPermNext(cb: () => void): Promise<UnlistenFn> {
   return await listen('hotkey_massperm_next', () => cb())
+}
+
+export async function onHotkeyMassPermPrev(cb: () => void): Promise<UnlistenFn> {
+  return await listen('hotkey_massperm_prev', () => cb())
 }
 
 export interface SessionApiMap {

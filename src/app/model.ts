@@ -39,6 +39,18 @@ export interface Settings {
   autoCaptureClipboard: boolean
   showIgnoredInQueue: boolean
   reviewHotkeysEnabled: boolean
+  reviewHotkeys: {
+    loadCurrent: string
+    prevMap: string
+    nextMap: string
+    replayCurrent: string
+  }
+  massPermHotkeys: {
+    play: string
+    pause: string
+    next: string
+    prev: string
+  }
   authToken: string | null
   authUserId: string | null
 }
@@ -57,9 +69,21 @@ export const DEFAULT_SETTINGS: Settings = {
   autoCaptureClipboard: false,
   showIgnoredInQueue: true,
   reviewHotkeysEnabled: true,
+  reviewHotkeys: {
+    loadCurrent: 'Ctrl+Alt+L',
+    prevMap: 'PageUp',
+    nextMap: 'PageDown',
+    replayCurrent: 'Insert',
+  },
+  massPermHotkeys: {
+    play: 'Insert',
+    pause: 'Delete',
+    next: 'PageDown',
+    prev: 'PageUp',
+  },
   authToken: null,
   authUserId: null,
 }
 
-export const APP_VERSION = '0.1.0'
+export const APP_VERSION = '1.0.4'
 
