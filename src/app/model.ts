@@ -85,5 +85,5 @@ export const DEFAULT_SETTINGS: Settings = {
   authUserId: null,
 }
 
-export const APP_VERSION = '1.0.5'
+export const APP_VERSION = '1.0.6'
 

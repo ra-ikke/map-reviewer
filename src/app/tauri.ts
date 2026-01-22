@@ -215,8 +215,16 @@ export async function submitSessionReview(
   categoryType: string,
   payload: ExportPayloadV1,
   token?: string | null,
+  votecrew?: boolean,
+  postAsPrivate?: boolean,
 ): Promise<SubmitReviewEnvelope> {
-  return await invoke<SubmitReviewEnvelope>('submit_session_review_api', { categoryType, payload, token })
+  return await invoke<SubmitReviewEnvelope>('submit_session_review_api', {
+    categoryType,
+    payload,
+    token,
+    votecrew,
+    postAsPrivate,
+  })
 }
 
 export interface MapInfoEntry {

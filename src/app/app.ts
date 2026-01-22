@@ -85,6 +85,15 @@ export function initApp(root: HTMLElement): void {
   let detailsBoundId: string | null = null
   let reviewSaveTimer: number | null = null
   let authUser: { name: string; username: string; avatar: string; roles: Array<{ id: string; name: string }> } | null = null
+  function isVotecrewUser(): boolean {
+    if (!authUser?.roles?.length) return false
+    return authUser.roles.some((role) => role.name.toLowerCase() === 'votecrew')
+  }
+
+  function isPublicUser(): boolean {
+    if (!authUser?.roles?.length) return false
+    return authUser.roles.some((role) => role.name.toLowerCase() === 'public')
+  }
   let authBusy = false
   let authed = false
   let authStatusMsg = ''
@@ -785,6 +794,7 @@ export function initApp(root: HTMLElement): void {
     const remaining = getUnreviewedCount()
     const canFinish = total > 0 && remaining === 0
     const missingMapcodes = getUnreviewedMapcodes()
+    const isPublic = isPublicUser()
 
     els.confirmFinishReview.style.display = 'grid'
     els.confirmFinishReview.innerHTML = `
@@ -815,6 +825,53 @@ export function initApp(root: HTMLElement): void {
                       .map((mc) => `<span class="mono" style="padding:4px 8px; border-radius:999px; background: rgba(255,255,255,.06);">${mc}</span>`)
                       .join('')}
                     ${missingMapcodes.length > 200 ? `<span class="wizardHint">(+${missingMapcodes.length - 200} more)</span>` : ''}
+                  </div>
+                </div>
+              `
+              : ''
+          }
+          ${
+            isPublic
+              ? `
+                <div class="kv">
+                  <div class="k">Publish as Private</div>
+                  <div class="row" style="gap: 8px;">
+                    <input type="checkbox" checked disabled />
+                    <div class="wizardHint">Public role requires private publish.</div>
+                  </div>
+                </div>
+                <div class="kv">
+                  <div class="k">POST payload preview</div>
+                  <div class="v" style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size: 12px; white-space: pre-wrap; word-break: break-word;">
+${JSON.stringify(
+  {
+    schemaVersion: 1,
+    appVersion: APP_VERSION,
+    exportedAt: nowIso(),
+    settings: {
+      commandMode: state.settings.commandMode,
+      dedupe: state.settings.dedupe,
+      autoCaptureClipboard: state.settings.autoCaptureClipboard,
+    },
+    session: state.session
+      ? {
+          category: state.session.category,
+          inputMethod: state.session.inputMethod,
+          startedAt: state.session.startedAt,
+          reviewerUserId: state.settings.authUserId ?? null,
+          threadId: state.session.threadId ?? null,
+          collectedAt: state.session.collectedAt ?? null,
+          limitPerUser: state.session.limitPerUser ?? null,
+        }
+      : null,
+    items: [],
+    userToken: 'USER_TOKEN_HERE',
+    votecrew: false,
+    postAsPrivate: true,
+  },
+  null,
+  2,
+)}
                   </div>
                 </div>
               `
@@ -870,7 +927,13 @@ export function initApp(root: HTMLElement): void {
         let submitStatus = 0
         let submitMsg: string | null = null
         try {
-          const res = await submitSessionReview(category, payload, state.settings.authToken)
+          const res = await submitSessionReview(
+            category,
+            payload,
+            state.settings.authToken,
+            isVotecrewUser(),
+            isPublic,
+          )
           submitOk = Boolean(res?.ok)
           submitStatus = Number(res?.status ?? 0)
           submitMsg = (res?.error ?? res?.body ?? null) as any

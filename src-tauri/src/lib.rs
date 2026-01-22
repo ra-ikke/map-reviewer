@@ -538,6 +538,8 @@ pub fn run() {
     category_type: String,
     payload: ExportPayloadV1,
     token: Option<String>,
+    votecrew: Option<bool>,
+    post_as_private: Option<bool>,
   ) -> Result<SubmitReviewEnvelope, String> {
     let Some(category) = normalize_category_code(&category_type) else {
       return Ok(SubmitReviewEnvelope {
@@ -575,11 +577,17 @@ pub fn run() {
       req = req.header("Authorization", format!("Bearer {}", cfg.token.trim()));
     }
 
-    // userToken is only part of the submit payload JSON.
+    // userToken/votecrew/postAsPrivate are only part of the submit payload JSON.
     let mut v = serde_json::to_value(&payload).map_err(|e| e.to_string())?;
     if let serde_json::Value::Object(ref mut obj) = v {
       if let Some(t) = token.as_ref().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
         obj.insert("userToken".to_string(), serde_json::Value::String(t));
+      }
+      if votecrew.unwrap_or(false) {
+        obj.insert("votecrew".to_string(), serde_json::Value::Bool(true));
+      }
+      if post_as_private.unwrap_or(false) {
+        obj.insert("postAsPrivate".to_string(), serde_json::Value::Bool(true));
       }
     }
 
