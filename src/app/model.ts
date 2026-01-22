@@ -40,7 +40,6 @@ export interface Settings {
   showIgnoredInQueue: boolean
   reviewHotkeysEnabled: boolean
   reviewHotkeys: {
-    loadCurrent: string
     prevMap: string
     nextMap: string
     replayCurrent: string
@@ -70,7 +69,6 @@ export const DEFAULT_SETTINGS: Settings = {
   showIgnoredInQueue: true,
   reviewHotkeysEnabled: true,
   reviewHotkeys: {
-    loadCurrent: 'Ctrl+Alt+L',
     prevMap: 'PageUp',
     nextMap: 'PageDown',
     replayCurrent: 'Insert',

@@ -12,7 +12,6 @@ import {
   openImportFileDialog,
   openExportSaveDialog,
   onHotkeyNavPlay,
-  onHotkeyPlayCurrent,
   onHotkeyReplayCurrent,
   onHotkeysStatus,
   onHotkeyMassPermNext,
@@ -41,6 +40,10 @@ import {
 
 function nowIso(): string {
   return new Date().toISOString()
+}
+
+function isMacOs(): boolean {
+  return /Mac|iPod|iPhone|iPad/.test(navigator.platform ?? '') || /Mac OS X/.test(navigator.userAgent ?? '')
 }
 
 function newId(): string {
@@ -205,7 +208,7 @@ export function initApp(root: HTMLElement): void {
                   <option value="/npp">/npp</option>
                 </select>
               </label>
-              <label class="field checkbox" title="Global hotkeys: Ctrl+Alt+L = load | PageUp = prev+load | PageDown = next+load | Insert = replay (Use this checkbox to enable/disable)">
+              <label class="field checkbox" title="Global hotkeys: PageUp = prev+load | PageDown = next+load | Insert = replay (Use this checkbox to enable/disable)">
                 <input id="reviewHotkeys" type="checkbox" />
                 <span>Hotkeys</span>
               </label>
@@ -2415,8 +2418,38 @@ export function initApp(root: HTMLElement): void {
   }
 
   function normalizeHotkeyValue(value: string): string {
-    return value.trim()
+  return normalizeHotkeyDisplay(value)
   }
+
+function normalizeHotkeyDisplay(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  const parts = trimmed
+    .split('+')
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+  if (!parts.length) return ''
+
+  const base = parts[parts.length - 1] ?? ''
+  const modifiers = parts.slice(0, -1).map((part) => {
+    if (part === 'Meta' && isMacOs()) return 'Cmd'
+    return part
+  })
+  const hasShift = modifiers.some((part) => part.toLowerCase() === 'shift')
+  if (['<', '>', '?'].includes(base) && !hasShift) {
+    modifiers.push('Shift')
+  }
+  const mappedBase =
+    base === '<' || base === ','
+      ? 'Comma'
+      : base === '>' || base === '.'
+        ? 'Period'
+        : base === '?' || base === '/'
+          ? 'Slash'
+          : base
+  return [...modifiers, mappedBase].join('+')
+}
 
   function formatHotkeyError(reason: string): string {
     return `Hotkeys: ${reason}`
@@ -2433,7 +2466,6 @@ export function initApp(root: HTMLElement): void {
   async function applyReviewHotkeysConfig(): Promise<void> {
     const hk = state.settings.reviewHotkeys
     await registerHotkeys({
-      loadCurrent: hk.loadCurrent,
       prevMap: hk.prevMap,
       nextMap: hk.nextMap,
       replayCurrent: hk.replayCurrent,
@@ -2455,7 +2487,7 @@ export function initApp(root: HTMLElement): void {
 
   function getReviewHotkeysTitle(): string {
     const hk = state.settings.reviewHotkeys
-    return `Global hotkeys: ${hk.loadCurrent} = load | ${hk.prevMap} = prev+load | ${hk.nextMap} = next+load | ${hk.replayCurrent} = replay`
+    return `Global hotkeys: ${hk.prevMap} = prev+load | ${hk.nextMap} = next+load | ${hk.replayCurrent} = replay`
   }
 
   function openHotkeysModal(kind: 'review' | 'mass_perm'): void {
@@ -2467,7 +2499,6 @@ export function initApp(root: HTMLElement): void {
     const prevMassPermEnabled = massPermHotkeysEnabled
     const groupFields = isReview
       ? [
-          { id: 'loadCurrent', label: 'Load current', value: reviewCurrent.loadCurrent },
           { id: 'prevMap', label: 'Prev + load', value: reviewCurrent.prevMap },
           { id: 'nextMap', label: 'Next + load', value: reviewCurrent.nextMap },
           { id: 'replayCurrent', label: 'Replay current', value: reviewCurrent.replayCurrent },
@@ -2525,7 +2556,7 @@ export function initApp(root: HTMLElement): void {
 
     const updateLabel = (id: string) => {
       const el = els.hotkeysModal.querySelector<HTMLSpanElement>(`#hk_val_${id}`)
-      if (el) el.textContent = stateMap.get(id) ?? ''
+      if (el) el.textContent = normalizeHotkeyDisplay(stateMap.get(id) ?? '')
     }
 
     const setCaptureTarget = (id: string | null) => {
@@ -2540,7 +2571,7 @@ export function initApp(root: HTMLElement): void {
       if (ev.ctrlKey) parts.push('Ctrl')
       if (ev.altKey) parts.push('Alt')
       if (ev.shiftKey) parts.push('Shift')
-      if (ev.metaKey) parts.push('Meta')
+      if (ev.metaKey) parts.push(isMacOs() ? 'Cmd' : 'Meta')
 
       let base = key
       if (base === ' ') base = 'Space'
@@ -2612,7 +2643,6 @@ export function initApp(root: HTMLElement): void {
       try {
         if (isReview) {
           const updated = {
-            loadCurrent: next.loadCurrent,
             prevMap: next.prevMap,
             nextMap: next.nextMap,
             replayCurrent: next.replayCurrent,
@@ -3351,9 +3381,6 @@ export function initApp(root: HTMLElement): void {
   })
 
   // eventos de hotkeys globais (best effort)
-  void onHotkeyPlayCurrent(() => void playSelected('hotkey: play current')).catch(() => {
-    // best effort
-  })
   void onHotkeyReplayCurrent(() => void playSelected('hotkey: replay current')).catch(() => {
     // best effort
   })

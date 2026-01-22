@@ -2,6 +2,32 @@ import { APP_VERSION, DEFAULT_SETTINGS, type AppState } from './model'
 
 const STORAGE_KEY = 'maps-reviewer-state-v1'
 
+function isMacOs(): boolean {
+  return /Mac|iPod|iPhone|iPad/.test(navigator.platform ?? '') || /Mac OS X/.test(navigator.userAgent ?? '')
+}
+
+function getPlatformDefaults(): AppState['settings'] {
+  if (!isMacOs()) {
+    return { ...DEFAULT_SETTINGS }
+  }
+
+  return {
+    ...DEFAULT_SETTINGS,
+    reviewHotkeys: {
+      ...DEFAULT_SETTINGS.reviewHotkeys,
+      prevMap: 'Cmd+<',
+      nextMap: 'Cmd+>',
+      replayCurrent: 'Cmd+?',
+    },
+    massPermHotkeys: {
+      ...DEFAULT_SETTINGS.massPermHotkeys,
+      playCurrent: 'Cmd+?',
+      next: 'Cmd+>',
+      prev: 'Cmd+<',
+    },
+  }
+}
+
 export function loadState(): AppState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -15,20 +41,21 @@ export function loadState(): AppState {
     }
 
     const parsedSettings = (parsed.settings ?? {}) as Partial<AppState['settings']>
+    const platformDefaults = getPlatformDefaults()
     const baseMassPerm = parsedSettings.massPermHotkeys ?? {}
     const legacyToggle =
       (baseMassPerm as any).toggle ??
       (baseMassPerm as any).play ??
-      DEFAULT_SETTINGS.massPermHotkeys.toggle
-    const legacyPlayCurrent = (baseMassPerm as any).playCurrent ?? DEFAULT_SETTINGS.massPermHotkeys.playCurrent
-    const legacyNext = (baseMassPerm as any).next ?? DEFAULT_SETTINGS.massPermHotkeys.next
-    const legacyPrev = (baseMassPerm as any).prev ?? DEFAULT_SETTINGS.massPermHotkeys.prev
+      platformDefaults.massPermHotkeys.toggle
+    const legacyPlayCurrent = (baseMassPerm as any).playCurrent ?? platformDefaults.massPermHotkeys.playCurrent
+    const legacyNext = (baseMassPerm as any).next ?? platformDefaults.massPermHotkeys.next
+    const legacyPrev = (baseMassPerm as any).prev ?? platformDefaults.massPermHotkeys.prev
 
     const settings: AppState['settings'] = {
-      ...DEFAULT_SETTINGS,
+      ...platformDefaults,
       ...parsedSettings,
       reviewHotkeys: {
-        ...DEFAULT_SETTINGS.reviewHotkeys,
+        ...platformDefaults.reviewHotkeys,
         ...(parsedSettings.reviewHotkeys ?? {}),
       },
       massPermHotkeys: {
@@ -58,7 +85,7 @@ export function saveState(state: AppState): void {
 export function freshState(): AppState {
   return {
     appVersion: APP_VERSION,
-    settings: { ...DEFAULT_SETTINGS },
+    settings: getPlatformDefaults(),
     session: null,
     items: [],
     selectedId: null,

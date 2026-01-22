@@ -54,7 +54,6 @@ pub fn run() {
   }
 
   struct HotkeyRegistry {
-    load_current: Mutex<Option<tauri_plugin_global_shortcut::Shortcut>>,
     prev_map: Mutex<Option<tauri_plugin_global_shortcut::Shortcut>>,
     next_map: Mutex<Option<tauri_plugin_global_shortcut::Shortcut>>,
     replay_current: Mutex<Option<tauri_plugin_global_shortcut::Shortcut>>,
@@ -70,7 +69,6 @@ pub fn run() {
   impl Default for HotkeyRegistry {
     fn default() -> Self {
       Self {
-        load_current: Mutex::new(None),
         prev_map: Mutex::new(None),
         next_map: Mutex::new(None),
         replay_current: Mutex::new(None),
@@ -94,8 +92,6 @@ pub fn run() {
   #[derive(Clone, serde::Deserialize, Debug)]
   #[serde(rename_all = "camelCase")]
   struct RegisterHotkeysArgs {
-    // ex: "Ctrl+Alt+L"
-    load_current: String,
     // defaults:
     // - "PageUp"
     // - "PageDown"
@@ -777,6 +773,60 @@ pub fn run() {
     format!("/p {} @{}", category_number, mapcode)
   }
 
+  fn is_macos() -> bool {
+    cfg!(target_os = "macos")
+  }
+
+  fn normalize_shortcut_string(raw: &str) -> String {
+    let parts: Vec<String> = raw
+      .split('+')
+      .map(|part| part.trim())
+      .filter(|part| !part.is_empty())
+      .map(|part| part.to_string())
+      .collect();
+
+    if parts.is_empty() {
+      return String::new();
+    }
+
+    let last_idx = parts.len().saturating_sub(1);
+    let mut normalized = Vec::with_capacity(parts.len() + 1);
+    let mut shift_present = false;
+    for (idx, part) in parts.iter().enumerate() {
+      if idx == last_idx {
+        continue;
+      }
+      if part.eq_ignore_ascii_case("shift") {
+        shift_present = true;
+      }
+      normalized.push(part.clone());
+    }
+
+    let base = parts.get(last_idx).cloned().unwrap_or_default();
+    let needs_shift = matches!(base.as_str(), "<" | ">" | "?");
+    if needs_shift && !shift_present {
+      normalized.push("Shift".to_string());
+    }
+
+    let mapped = match base.as_str() {
+      "<" | "," => "Comma",
+      ">" | "." => "Period",
+      "?" | "/" => "Slash",
+      _ => base.as_str(),
+    };
+    normalized.push(mapped.to_string());
+
+    normalized.join("+")
+  }
+
+  fn paste_modifier_key() -> enigo::Key {
+    if is_macos() {
+      enigo::Key::Meta
+    } else {
+      enigo::Key::Control
+    }
+  }
+
   fn type_in_active_window_and_enter(text: &str) -> Result<(), String> {
     use enigo::{Direction, Enigo, Key, Keyboard, Settings};
     use std::{thread, time::Duration};
@@ -802,12 +852,12 @@ pub fn run() {
     enigo.key(Key::Return, Direction::Click).map_err(|e| e.to_string())?;
     thread::sleep(Duration::from_millis(AFTER_OPEN_CHAT_DELAY_MS));
 
-    // Ctrl+V
-    enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
+    // Paste shortcut: Cmd+V on macOS, Ctrl+V otherwise.
+    let paste_modifier = paste_modifier_key();
+    enigo.key(paste_modifier, Direction::Press).map_err(|e| e.to_string())?;
     enigo.key(Key::Unicode('v'), Direction::Click).map_err(|e| e.to_string())?;
-    enigo
-      .key(Key::Control, Direction::Release)
-      .map_err(|e| e.to_string())?;
+    let paste_modifier = paste_modifier_key();
+    enigo.key(paste_modifier, Direction::Release).map_err(|e| e.to_string())?;
 
     thread::sleep(Duration::from_millis(AFTER_PASTE_DELAY_MS));
     enigo.key(Key::Return, Direction::Click).map_err(|e| e.to_string())?;
@@ -828,7 +878,6 @@ pub fn run() {
   }
 
   fn unregister_all_hotkeys(app: &tauri::AppHandle, reg: &HotkeyRegistry) -> Result<(), String> {
-    let load = reg.load_current.lock().map_err(|_| "hotkey lock poisoned")?.clone();
     let prev = reg.prev_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
     let next = reg.next_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
     let replay = reg.replay_current.lock().map_err(|_| "hotkey lock poisoned")?.clone();
@@ -838,7 +887,6 @@ pub fn run() {
     let mp_prev = reg.mp_prev.lock().map_err(|_| "hotkey lock poisoned")?.clone();
 
     // unregister (best effort)
-    unregister_shortcut(app, &load);
     unregister_shortcut(app, &prev);
     unregister_shortcut(app, &next);
     unregister_shortcut(app, &replay);
@@ -847,7 +895,6 @@ pub fn run() {
     unregister_shortcut(app, &mp_next);
     unregister_shortcut(app, &mp_prev);
 
-    *reg.load_current.lock().map_err(|_| "hotkey lock poisoned")? = None;
     *reg.prev_map.lock().map_err(|_| "hotkey lock poisoned")? = None;
     *reg.next_map.lock().map_err(|_| "hotkey lock poisoned")? = None;
     *reg.replay_current.lock().map_err(|_| "hotkey lock poisoned")? = None;
@@ -893,16 +940,16 @@ pub fn run() {
       return Err("empty mass perm hotkey".to_string());
     }
 
-    let mp_play = toggle_accel
+    let mp_play = normalize_shortcut_string(toggle_accel)
       .parse::<tauri_plugin_global_shortcut::Shortcut>()
       .map_err(|_| format!("invalid hotkey (toggle): {toggle_accel}"))?;
-    let mp_pause = play_current_accel
+    let mp_pause = normalize_shortcut_string(play_current_accel)
       .parse::<tauri_plugin_global_shortcut::Shortcut>()
       .map_err(|_| format!("invalid hotkey (playCurrent): {play_current_accel}"))?;
-    let mp_next = next_accel
+    let mp_next = normalize_shortcut_string(next_accel)
       .parse::<tauri_plugin_global_shortcut::Shortcut>()
       .map_err(|_| format!("invalid hotkey (next): {next_accel}"))?;
-    let mp_prev = prev_accel
+    let mp_prev = normalize_shortcut_string(prev_accel)
       .parse::<tauri_plugin_global_shortcut::Shortcut>()
       .map_err(|_| format!("invalid hotkey (prev): {prev_accel}"))?;
 
@@ -913,12 +960,11 @@ pub fn run() {
 
     if enabled {
       // Remove conflitos entre hotkeys de sessão e mass perm
-      let load = reg.load_current.lock().map_err(|_| "hotkey lock poisoned")?.clone();
       let prev = reg.prev_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
       let next = reg.next_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
       let replay = reg.replay_current.lock().map_err(|_| "hotkey lock poisoned")?.clone();
       let mp_list = vec![mp_play.clone(), mp_pause.clone(), mp_next.clone(), mp_prev.clone()];
-      for sc in [load, prev, next, replay].into_iter().flatten() {
+      for sc in [prev, next, replay].into_iter().flatten() {
         if mp_list.iter().any(|x| x == &sc) {
           unregister_shortcut(app, &Some(sc));
         }
@@ -940,7 +986,6 @@ pub fn run() {
         let next = reg.next_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
         let replay = reg.replay_current.lock().map_err(|_| "hotkey lock poisoned")?.clone();
         let prev = reg.prev_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
-        let load = reg.load_current.lock().map_err(|_| "hotkey lock poisoned")?.clone();
         if let Some(sc) = next {
           let _ = app.global_shortcut().register(sc);
         }
@@ -948,9 +993,6 @@ pub fn run() {
           let _ = app.global_shortcut().register(sc);
         }
         if let Some(sc) = prev {
-          let _ = app.global_shortcut().register(sc);
-        }
-        if let Some(sc) = load {
           let _ = app.global_shortcut().register(sc);
         }
       }
@@ -969,7 +1011,6 @@ pub fn run() {
 
     reg.enabled.store(enabled, Ordering::SeqCst);
 
-    let load = reg.load_current.lock().map_err(|_| "hotkey lock poisoned")?.clone();
     let prev = reg.prev_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
     let next = reg.next_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
     let replay = reg
@@ -979,9 +1020,6 @@ pub fn run() {
       .clone();
 
     if enabled {
-      if let Some(sc) = load {
-        let _ = app.global_shortcut().register(sc);
-      }
       if let Some(sc) = prev {
         let _ = app.global_shortcut().register(sc);
       }
@@ -992,7 +1030,6 @@ pub fn run() {
         let _ = app.global_shortcut().register(sc);
       }
     } else {
-      unregister_shortcut(app, &load);
       unregister_shortcut(app, &prev);
       unregister_shortcut(app, &next);
       unregister_shortcut(app, &replay);
@@ -1175,30 +1212,20 @@ pub fn run() {
     // troca hotkeys de forma idempotente
     unregister_all_hotkeys(&app, &reg)?;
 
-    let accel = args.load_current.trim();
-    if accel.is_empty() {
-      return Err("empty loadCurrent hotkey".into());
-    }
-
-    let load_current = accel
-      .parse::<tauri_plugin_global_shortcut::Shortcut>()
-      .map_err(|_| format!("invalid hotkey: {accel}"))?;
-
     let prev_accel = args.prev_map.as_deref().unwrap_or("PageUp").trim();
     let next_accel = args.next_map.as_deref().unwrap_or("PageDown").trim();
     let replay_accel = args.replay_current.as_deref().unwrap_or("Insert").trim();
 
-    let prev_map = prev_accel
+    let prev_map = normalize_shortcut_string(prev_accel)
       .parse::<tauri_plugin_global_shortcut::Shortcut>()
       .map_err(|_| format!("invalid hotkey (prevMap): {prev_accel}"))?;
-    let next_map = next_accel
+    let next_map = normalize_shortcut_string(next_accel)
       .parse::<tauri_plugin_global_shortcut::Shortcut>()
       .map_err(|_| format!("invalid hotkey (nextMap): {next_accel}"))?;
-    let replay_current = replay_accel
+    let replay_current = normalize_shortcut_string(replay_accel)
       .parse::<tauri_plugin_global_shortcut::Shortcut>()
       .map_err(|_| format!("invalid hotkey (replayCurrent): {replay_accel}"))?;
 
-    *reg.load_current.lock().map_err(|_| "hotkey lock poisoned")? = Some(load_current.clone());
     *reg.prev_map.lock().map_err(|_| "hotkey lock poisoned")? = Some(prev_map.clone());
     *reg.next_map.lock().map_err(|_| "hotkey lock poisoned")? = Some(next_map.clone());
     *reg
@@ -1217,10 +1244,6 @@ pub fn run() {
         mp_list.iter().flatten().any(|mp| mp == sc)
       };
 
-      app
-        .global_shortcut()
-        .register(load_current.clone())
-        .map_err(|e| e.to_string())?;
       if !reg.mp_enabled.load(Ordering::SeqCst) || !conflicts(&prev_map) {
         let _ = app.global_shortcut().register(prev_map.clone());
       }
@@ -1236,7 +1259,6 @@ pub fn run() {
       "hotkeys_registered",
       serde_json::json!({
         "enabled": reg.enabled.load(Ordering::SeqCst),
-        "loadCurrent": accel,
         "prevMap": prev_accel,
         "nextMap": next_accel,
         "replayCurrent": replay_accel
@@ -1348,12 +1370,6 @@ pub fn run() {
           }
 
           if !reg.enabled.load(Ordering::SeqCst) {
-            return;
-          }
-
-          let load = reg.load_current.lock().ok().and_then(|g| g.clone());
-          if load.as_ref() == Some(shortcut) {
-            let _ = app.emit("hotkey_play_current", ());
             return;
           }
 

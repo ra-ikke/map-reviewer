@@ -88,10 +88,6 @@ export async function onClipboardChanged(cb: (text: string) => void): Promise<Un
   return await listen<string>('clipboard_changed', (event) => cb(event.payload))
 }
 
-export async function onHotkeyPlayCurrent(cb: () => void): Promise<UnlistenFn> {
-  return await listen('hotkey_play_current', () => cb())
-}
-
 export async function onHotkeyReplayCurrent(cb: () => void): Promise<UnlistenFn> {
   return await listen('hotkey_replay_current', () => cb())
 }
@@ -138,13 +134,11 @@ export async function exportJsonToPath(path: string, payload: ExportPayloadV1): 
 }
 
 export async function registerHotkeys(args?: {
-  loadCurrent?: string
   prevMap?: string
   nextMap?: string
   replayCurrent?: string
 }): Promise<void> {
   const payload = {
-    loadCurrent: args?.loadCurrent ?? 'Ctrl+Alt+L',
     prevMap: args?.prevMap,
     nextMap: args?.nextMap,
     replayCurrent: args?.replayCurrent,
