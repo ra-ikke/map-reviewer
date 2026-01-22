@@ -862,7 +862,7 @@ pub fn run() {
       let paste_modifier = paste_modifier_key();
       enigo.key(paste_modifier, Direction::Press).map_err(|e| e.to_string())?;
       thread::sleep(Duration::from_millis(30));
-      enigo.key(Key::Layout('v'), Direction::Click).map_err(|e| e.to_string())?;
+      enigo.key(Key::Unicode('v'), Direction::Click).map_err(|e| e.to_string())?;
       thread::sleep(Duration::from_millis(30));
       let paste_modifier = paste_modifier_key();
       enigo.key(paste_modifier, Direction::Release).map_err(|e| e.to_string())?;
