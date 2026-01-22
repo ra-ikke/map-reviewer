@@ -837,6 +837,9 @@ pub fn run() {
     const PRE_OPEN_CHAT_DELAY_MS: u64 = 40;
     const AFTER_OPEN_CHAT_DELAY_MS: u64 = 140;
     const AFTER_PASTE_DELAY_MS: u64 = 120;
+    const PRE_OPEN_CHAT_DELAY_MAC_MS: u64 = 70;
+    const AFTER_OPEN_CHAT_DELAY_MAC_MS: u64 = 220;
+    const AFTER_PASTE_DELAY_MAC_MS: u64 = 180;
 
     // Most reliable approach across keyboard layouts (Windows especially):
     // put text in clipboard, paste (Ctrl+V), then Enter.
@@ -846,21 +849,42 @@ pub fn run() {
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
     let prev_clip = clipboard.get_text().ok();
     clipboard.set_text(text.to_string()).map_err(|e| e.to_string())?;
+    if is_macos() {
+      thread::sleep(Duration::from_millis(30));
+    }
 
-    // Typical game flow: Enter (open chat) -> paste -> Enter (submit)
-    thread::sleep(Duration::from_millis(PRE_OPEN_CHAT_DELAY_MS));
-    enigo.key(Key::Return, Direction::Click).map_err(|e| e.to_string())?;
-    thread::sleep(Duration::from_millis(AFTER_OPEN_CHAT_DELAY_MS));
+    if is_macos() {
+      // macOS: use clipboard paste (Cmd+V) with extra delays.
+      thread::sleep(Duration::from_millis(PRE_OPEN_CHAT_DELAY_MAC_MS));
+      enigo.key(Key::Return, Direction::Click).map_err(|e| e.to_string())?;
+      thread::sleep(Duration::from_millis(AFTER_OPEN_CHAT_DELAY_MAC_MS));
 
-    // Paste shortcut: Cmd+V on macOS, Ctrl+V otherwise.
-    let paste_modifier = paste_modifier_key();
-    enigo.key(paste_modifier, Direction::Press).map_err(|e| e.to_string())?;
-    enigo.key(Key::Unicode('v'), Direction::Click).map_err(|e| e.to_string())?;
-    let paste_modifier = paste_modifier_key();
-    enigo.key(paste_modifier, Direction::Release).map_err(|e| e.to_string())?;
+      let paste_modifier = paste_modifier_key();
+      enigo.key(paste_modifier, Direction::Press).map_err(|e| e.to_string())?;
+      thread::sleep(Duration::from_millis(30));
+      enigo.key(Key::Layout('v'), Direction::Click).map_err(|e| e.to_string())?;
+      thread::sleep(Duration::from_millis(30));
+      let paste_modifier = paste_modifier_key();
+      enigo.key(paste_modifier, Direction::Release).map_err(|e| e.to_string())?;
 
-    thread::sleep(Duration::from_millis(AFTER_PASTE_DELAY_MS));
-    enigo.key(Key::Return, Direction::Click).map_err(|e| e.to_string())?;
+      thread::sleep(Duration::from_millis(AFTER_PASTE_DELAY_MAC_MS));
+      enigo.key(Key::Return, Direction::Click).map_err(|e| e.to_string())?;
+    } else {
+      // Typical game flow: Enter (open chat) -> paste -> Enter (submit)
+      thread::sleep(Duration::from_millis(PRE_OPEN_CHAT_DELAY_MS));
+      enigo.key(Key::Return, Direction::Click).map_err(|e| e.to_string())?;
+      thread::sleep(Duration::from_millis(AFTER_OPEN_CHAT_DELAY_MS));
+
+      // Paste shortcut: Cmd+V on macOS, Ctrl+V otherwise.
+      let paste_modifier = paste_modifier_key();
+      enigo.key(paste_modifier, Direction::Press).map_err(|e| e.to_string())?;
+      enigo.key(Key::Unicode('v'), Direction::Click).map_err(|e| e.to_string())?;
+      let paste_modifier = paste_modifier_key();
+      enigo.key(paste_modifier, Direction::Release).map_err(|e| e.to_string())?;
+
+      thread::sleep(Duration::from_millis(AFTER_PASTE_DELAY_MS));
+      enigo.key(Key::Return, Direction::Click).map_err(|e| e.to_string())?;
+    }
 
     // best-effort clipboard restore (only if it was text)
     if let Some(prev) = prev_clip {
