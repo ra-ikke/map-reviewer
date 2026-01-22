@@ -846,7 +846,7 @@ pub fn run() {
     enigo.key(Key::Unicode('v'), Direction::Click).map_err(|e| e.to_string())?;
     thread::sleep(Duration::from_millis(20));
     enigo.key(cmd, Direction::Release).map_err(|e| e.to_string())?;
-    thread::sleep(Duration::from_millis(20));
+    thread::sleep(Duration::from_millis(250));
     enigo.key(Key::Return, Direction::Click).map_err(|e| e.to_string())?;
 
     // best-effort clipboard restore (only if it was text)
