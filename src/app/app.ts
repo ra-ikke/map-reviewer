@@ -835,44 +835,10 @@ export function initApp(root: HTMLElement): void {
               ? `
                 <div class="kv">
                   <div class="k">Publish as Private</div>
-                  <div class="row" style="gap: 8px;">
-                    <input type="checkbox" checked disabled />
-                    <div class="wizardHint">Public role requires private publish.</div>
-                  </div>
-                </div>
-                <div class="kv">
-                  <div class="k">POST payload preview</div>
-                  <div class="v" style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size: 12px; white-space: pre-wrap; word-break: break-word;">
-${JSON.stringify(
-  {
-    schemaVersion: 1,
-    appVersion: APP_VERSION,
-    exportedAt: nowIso(),
-    settings: {
-      commandMode: state.settings.commandMode,
-      dedupe: state.settings.dedupe,
-      autoCaptureClipboard: state.settings.autoCaptureClipboard,
-    },
-    session: state.session
-      ? {
-          category: state.session.category,
-          inputMethod: state.session.inputMethod,
-          startedAt: state.session.startedAt,
-          reviewerUserId: state.settings.authUserId ?? null,
-          threadId: state.session.threadId ?? null,
-          collectedAt: state.session.collectedAt ?? null,
-          limitPerUser: state.session.limitPerUser ?? null,
-        }
-      : null,
-    items: [],
-    userToken: 'USER_TOKEN_HERE',
-    votecrew: false,
-    postAsPrivate: true,
-  },
-  null,
-  2,
-)}
-                  </div>
+                  <label class="row" style="gap: 8px; align-items: center;">
+                    <input id="frPostAsPrivate" type="checkbox" />
+                    <div class="wizardHint">Default: off. Enable to publish privately.</div>
+                  </label>
                 </div>
               `
               : ''
@@ -900,6 +866,7 @@ ${JSON.stringify(
 
     const frCancel = els.confirmFinishReview.querySelector<HTMLButtonElement>('#frCancel')!
     const frFinish = els.confirmFinishReview.querySelector<HTMLButtonElement>('#frFinish')
+    const frPostAsPrivate = els.confirmFinishReview.querySelector<HTMLInputElement>('#frPostAsPrivate')
 
     const close = () => {
       els.confirmFinishReview.style.display = 'none'
@@ -926,13 +893,14 @@ ${JSON.stringify(
         let submitOk = false
         let submitStatus = 0
         let submitMsg: string | null = null
+        const postAsPrivate = Boolean(frPostAsPrivate?.checked)
         try {
           const res = await submitSessionReview(
             category,
             payload,
             state.settings.authToken,
             isVotecrewUser(),
-            isPublic,
+            postAsPrivate,
           )
           submitOk = Boolean(res?.ok)
           submitStatus = Number(res?.status ?? 0)
