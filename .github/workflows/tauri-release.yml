@@ -43,10 +43,13 @@ jobs:
       - name: Install JS deps
         run: npm ci
 
+      - name: Sync version from tag
+        run: node scripts/sync-version-from-tag.mjs "${{ github.ref_name }}"
+
       - name: Build + publish GitHub Release assets
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Required for updater artifacts/signing:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
