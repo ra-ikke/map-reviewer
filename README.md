@@ -55,8 +55,8 @@ When finishing a review, if any maps have the **will be discussed** decision, th
 
 ## Export JSON
 
-- Click **“Export JSON”** (top bar).
-- Pick a location in the “Save As” dialog.
+- Click **"Export JSON"** (top bar).
+- Pick a location in the "Save As" dialog.
 - The file is generated with a **stable schema**:
   - `schemaVersion` (currently `1`)
   - `appVersion`
@@ -97,5 +97,17 @@ Artifacts are located at `maps-reviewer-desktop/src-tauri/target/release/bundle/
 ### Notes
 
 - **Windows**: if Tauri complains about WebView2, install **Microsoft Edge WebView2 Runtime**.
-- **macOS**: global hotkeys + “typing into the active window” require Accessibility permissions (above).
+- **macOS**: global hotkeys + "typing into the active window" require Accessibility permissions (above).
 
+## GitHub Releases (CI)
+
+Push a semver tag (e.g. `1.0.12`) to trigger `.github/workflows/tauri-release.yml`. The workflow syncs the app version from the tag, builds for Linux/macOS/Windows, and publishes a GitHub Release with updater artifacts (`latest.json`, `.sig`).
+
+If the build succeeds but publishing fails:
+
+| Error | Fix |
+| --- | --- |
+| `Resource not accessible by integration` | In the repo on GitHub: **Settings → Actions → General → Workflow permissions** → enable **Read and write permissions**, then re-run the workflow. |
+| `Bad credentials` | Create a classic PAT with `repo` scope and save it as the `RELEASE_TOKEN` repository secret (the workflow uses `RELEASE_TOKEN` when set, otherwise `GITHUB_TOKEN`). |
+
+The `Couldn't parse --config flag as inline JSON` message is harmless — the CLI falls back to the config file path.
