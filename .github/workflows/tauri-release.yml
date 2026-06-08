@@ -6,40 +6,90 @@ on:
       - "*.*.*"
 
 jobs:
-  check-release-access:
+  diagnose-release-token:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - name: Test GitHub Release write access
+      - name: Validate RELEASE_TOKEN
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          PAT: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "::error::No GitHub token available."
+          set -euo pipefail
+
+          if [ -z "${PAT}" ]; then
+            echo "::error::RELEASE_TOKEN is missing."
+            echo "Add a classic PAT (scope: repo) as repository secret RELEASE_TOKEN."
+            echo "Repo: Settings > Secrets and variables > Actions > New repository secret"
             exit 1
           fi
+
+          echo "RELEASE_TOKEN is configured (${#PAT} characters)."
+
+          user_code=$(curl -s -o /tmp/user.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/user")
+          echo "GET /user => HTTP ${user_code}"
+
+          if [ "${user_code}" != "200" ]; then
+            echo "::error::RELEASE_TOKEN is invalid or expired."
+            cat /tmp/user.json
+            exit 1
+          fi
+
+          login=$(python3 -c "import json; print(json.load(open('/tmp/user.json'))['login'])")
+          echo "Authenticated as: ${login}"
 
           probe_tag="__probe_${GITHUB_RUN_ID}"
-          if gh release create "${probe_tag}" --title "permission probe" --notes "probe" --draft; then
-            gh release delete "${probe_tag}" --yes
-            echo "Release write access OK."
-          else
-            echo "::error::Cannot create GitHub Releases with the current token."
+          rel_code=$(curl -s -o /tmp/rel.json -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            -d "{\"tag_name\":\"${probe_tag}\",\"name\":\"probe\",\"body\":\"probe\",\"draft\":true}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases")
+          echo "POST /releases => HTTP ${rel_code}"
+
+          if [ "${rel_code}" != "201" ]; then
+            echo "::error::RELEASE_TOKEN cannot create releases in ${GITHUB_REPOSITORY}."
+            cat /tmp/rel.json
             echo ""
-            echo "Fix option A — enable GITHUB_TOKEN writes:"
-            echo "  Repo Settings > Actions > General > Workflow permissions > Read and write permissions"
-            echo ""
-            echo "Fix option B — use a Personal Access Token:"
-            echo "  1. GitHub profile Settings > Developer settings > Personal access tokens > Tokens (classic)"
-            echo "  2. Generate token with 'repo' scope"
-            echo "  3. Save as RELEASE_TOKEN in repo Settings > Secrets and variables > Actions"
+            echo "Common fixes:"
+            echo "  - Use a classic PAT with 'repo' scope (fine-grained tokens often fail here)."
+            echo "  - If the org uses SSO: https://github.com/settings/tokens > Configure SSO > Authorize."
+            echo "  - Confirm ${login} has write access to ${GITHUB_REPOSITORY}."
+            echo "  - Check org policy: Settings > Personal access tokens (classic) must be allowed."
             exit 1
           fi
 
+          rel_id=$(python3 -c "import json; print(json.load(open('/tmp/rel.json'))['id'])")
+          curl -s -X DELETE \
+            -H "Authorization: Bearer ${PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${rel_id}" >/dev/null
+          echo "Release write access confirmed."
+
+  create-release:
+    needs: diagnose-release-token
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release (draft)
+        id: release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.RELEASE_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: Automated release.
+          draft: true
+          prerelease: false
+          generate_release_notes: true
+
   build-and-release:
-    needs: check-release-access
+    needs: create-release
     permissions:
       contents: write
     strategy:
@@ -78,20 +128,33 @@ jobs:
       - name: Sync version from tag
         run: node scripts/sync-version-from-tag.mjs "${{ github.ref_name }}"
 
-      - name: Build + publish GitHub Release assets
+      - name: Build + upload release assets
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          # Required for updater artifacts/signing:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           SESSION_API_BASE_URL: https://ikke-dev.com.br/
         with:
-          # This config enables createUpdaterArtifacts=true
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          releaseDraft: true
           args: --config src-tauri/tauri.updater.conf.json
-          tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
-          releaseBody: "Automated release."
-          releaseDraft: false
-          prerelease: false
+
+  publish-release:
+    needs: [create-release, build-and-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release
+        shell: bash
+        env:
+          PAT: ${{ secrets.RELEASE_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          curl -s -X PATCH \
+            -H "Authorization: Bearer ${PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            -d '{"draft":false}' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"
+          echo "Release published."
 

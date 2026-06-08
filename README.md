@@ -103,11 +103,24 @@ Artifacts are located at `maps-reviewer-desktop/src-tauri/target/release/bundle/
 
 Push a semver tag (e.g. `1.0.12`) to trigger `.github/workflows/tauri-release.yml`. The workflow syncs the app version from the tag, builds for Linux/macOS/Windows, and publishes a GitHub Release with updater artifacts (`latest.json`, `.sig`).
 
-If the build succeeds but publishing fails:
+Releases require a **classic PAT** saved as repository secret `RELEASE_TOKEN` (scope `repo`). The workflow no longer relies on `GITHUB_TOKEN` for publishing.
+
+### Configure `RELEASE_TOKEN`
+
+1. GitHub profile → **Settings → Developer settings → Personal access tokens → Tokens (classic)**
+2. **Generate new token (classic)** with scope **`repo`**
+3. If the org uses SSO (e.g. `ra-ikke`): on the tokens page click **Configure SSO** → **Authorize** for the organization
+4. Repo **Settings → Secrets and variables → Actions** → secret name **`RELEASE_TOKEN`** (exact name)
+
+Use a **classic** token. Fine-grained tokens often fail with Tauri/org repos.
+
+### CI troubleshooting
 
 | Error | Fix |
 | --- | --- |
-| `Resource not accessible by integration` | In the repo on GitHub: **Settings → Actions → General → Workflow permissions** → enable **Read and write permissions**, then re-run the workflow. |
-| `Bad credentials` | Create a classic PAT with `repo` scope and save it as the `RELEASE_TOKEN` repository secret (the workflow uses `RELEASE_TOKEN` when set, otherwise `GITHUB_TOKEN`). |
+| `RELEASE_TOKEN is missing` | Create the secret in the **repository** (not only org-level), name exactly `RELEASE_TOKEN`. |
+| `RELEASE_TOKEN is invalid or expired` | Regenerate the PAT and update the secret. |
+| `RELEASE_TOKEN cannot create releases` | Authorize SSO for the org; confirm your user has write access to the repo; use classic PAT with `repo` scope. |
+| `Resource not accessible by integration` | The publish step was still using `GITHUB_TOKEN` — pull the latest workflow (uses `RELEASE_TOKEN` + `softprops/action-gh-release`). |
 
 The `Couldn't parse --config flag as inline JSON` message is harmless — the CLI falls back to the config file path.
