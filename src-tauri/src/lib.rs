@@ -614,6 +614,163 @@ pub fn run() {
     }
   }
 
+  #[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
+  #[serde(rename_all = "camelCase")]
+  struct CreateDiscussionRequest {
+    map_code: String,
+    category: String,
+    disc_type: String,
+    notify: bool,
+  }
+
+  #[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
+  #[serde(rename_all = "camelCase")]
+  struct DiscussionRequestedBy {
+    #[serde(deserialize_with = "de_string_from_number_or_string")]
+    id: String,
+    name: String,
+    username: String,
+  }
+
+  #[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
+  #[serde(rename_all = "camelCase")]
+  struct CreateDiscussionSuccess {
+    ok: bool,
+    thread_id: Option<String>,
+    jump_url: Option<String>,
+    map_code: Option<String>,
+    map_author: Option<String>,
+    category: Option<String>,
+    disc_type: Option<String>,
+    notify: Option<bool>,
+    requested_by: Option<DiscussionRequestedBy>,
+    error: Option<String>,
+  }
+
+  #[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
+  #[serde(rename_all = "camelCase")]
+  struct CreateDiscussionEnvelope {
+    ok: bool,
+    status: u16,
+    data: Option<CreateDiscussionSuccess>,
+    error: Option<String>,
+  }
+
+  #[tauri::command]
+  fn create_discussion_api(
+    token: String,
+    map_code: String,
+    category_type: String,
+    disc_type: Option<String>,
+    notify: Option<bool>,
+  ) -> Result<CreateDiscussionEnvelope, String> {
+    let t = token.trim().to_string();
+    if t.is_empty() {
+      return Ok(CreateDiscussionEnvelope {
+        ok: false,
+        status: 400,
+        data: None,
+        error: Some("missing_token".to_string()),
+      });
+    }
+
+    let Some(category) = normalize_category_code(&category_type) else {
+      return Ok(CreateDiscussionEnvelope {
+        ok: false,
+        status: 400,
+        data: None,
+        error: Some("missing_category".to_string()),
+      });
+    };
+
+    let mc = map_code.trim().to_string();
+    if mc.is_empty() {
+      return Ok(CreateDiscussionEnvelope {
+        ok: false,
+        status: 400,
+        data: None,
+        error: Some("missing_map_code".to_string()),
+      });
+    }
+
+    let disc = disc_type
+      .as_deref()
+      .map(|s| s.trim().to_uppercase())
+      .filter(|s| !s.is_empty())
+      .unwrap_or_else(|| "PERM".to_string());
+
+    let cfg = load_session_api_config();
+    let url = reqwest::Url::parse(&cfg.base_url)
+      .map_err(|e| e.to_string())?
+      .join("discussion")
+      .map_err(|e| e.to_string())?;
+
+    let client = reqwest::blocking::Client::builder()
+      .timeout(StdDuration::from_secs(15))
+      .build()
+      .map_err(|e| e.to_string())?;
+
+    let body = CreateDiscussionRequest {
+      map_code: mc,
+      category,
+      disc_type: disc,
+      notify: notify.unwrap_or(true),
+    };
+
+    let resp = client
+      .post(url)
+      .header("Authorization", format!("Bearer {t}"))
+      .json(&body)
+      .send()
+      .map_err(|e| e.to_string())?;
+
+    let status = resp.status().as_u16();
+    let text = resp.text().unwrap_or_default();
+
+    if let Ok(parsed) = serde_json::from_str::<CreateDiscussionSuccess>(&text) {
+      if parsed.ok {
+        return Ok(CreateDiscussionEnvelope {
+          ok: true,
+          status,
+          data: Some(parsed),
+          error: None,
+        });
+      }
+      let err = parsed
+        .error
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("request_failed")
+        .to_string();
+      return Ok(CreateDiscussionEnvelope {
+        ok: false,
+        status,
+        data: Some(parsed),
+        error: Some(err),
+      });
+    }
+
+    if (200..300).contains(&status) {
+      return Ok(CreateDiscussionEnvelope {
+        ok: false,
+        status,
+        data: None,
+        error: Some("invalid_response".to_string()),
+      });
+    }
+
+    Ok(CreateDiscussionEnvelope {
+      ok: false,
+      status,
+      data: None,
+      error: Some(if text.trim().is_empty() {
+        "request_failed".to_string()
+      } else {
+        text
+      }),
+    })
+  }
+
   // -------------------------
   // Auth (validate token)
   // -------------------------
@@ -1409,6 +1566,7 @@ pub fn run() {
       validate_auth_token,
       fetch_session_api,
       submit_session_review_api,
+      create_discussion_api,
       register_hotkeys,
       set_massperm_hotkeys_enabled_cmd,
       set_review_hotkeys_enabled_cmd,

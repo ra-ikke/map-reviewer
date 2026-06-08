@@ -533,6 +533,38 @@ body.session-active #inputPanel {
     monospace;
 }
 
+.discussMapList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgb(var(--panel2-rgb) / 0.45);
+}
+
+.discussMapRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.discussResultList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.discussResultRow {
+  font-size: 12px;
+}
+
 @media (max-width: 1100px) {
   .main {
     grid-template-columns: 1fr;

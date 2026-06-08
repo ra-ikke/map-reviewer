@@ -221,6 +221,48 @@ export async function submitSessionReview(
   })
 }
 
+export interface DiscussionRequestedBy {
+  id: string
+  name: string
+  username: string
+}
+
+export interface CreateDiscussionSuccess {
+  ok: boolean
+  threadId?: string | null
+  jumpUrl?: string | null
+  mapCode?: string | null
+  mapAuthor?: string | null
+  category?: string | null
+  discType?: string | null
+  notify?: boolean | null
+  requestedBy?: DiscussionRequestedBy | null
+  error?: string | null
+}
+
+export interface CreateDiscussionEnvelope {
+  ok: boolean
+  status: number
+  data?: CreateDiscussionSuccess | null
+  error?: string | null
+}
+
+export async function createDiscussion(
+  token: string,
+  mapCode: string,
+  categoryType: string,
+  discType = 'PERM',
+  notify = true,
+): Promise<CreateDiscussionEnvelope> {
+  return await invoke<CreateDiscussionEnvelope>('create_discussion_api', {
+    token,
+    mapCode,
+    categoryType,
+    discType,
+    notify,
+  })
+}
+
 export interface MapInfoEntry {
   id: number
   author: string

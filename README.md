@@ -45,6 +45,14 @@ Example (build-time for CI):
 SESSION_API_BASE_URL=https://ikke-dev.com.br/ npx tauri build
 ```
 
+## Finish review — forum discussions
+
+When finishing a review, if any maps have the **will be discussed** decision, the confirmation modal lists them with checkboxes (select all or individual). On **Save & finish**, the app can create PERM forum threads on Discord via `POST /discussion` using your **Auth token** (`Authorization: Bearer <userToken>`).
+
+- Requires a valid user token (Settings → Auth).
+- Selected maps are created with `discType: PERM` and `notify: true`.
+- Results (including `jumpUrl` links) appear in the post-finish summary modal.
+
 ## Export JSON
 
 - Click **“Export JSON”** (top bar).

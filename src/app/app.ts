@@ -9,6 +9,7 @@ import {
   fetchMapInfo,
   fetchSessionFromApi,
   submitSessionReview,
+  createDiscussion,
   openImportFileDialog,
   openExportSaveDialog,
   onHotkeyNavPlay,
@@ -340,6 +341,15 @@ export function initApp(root: HTMLElement): void {
     return state.items
       .filter((it) => !it.decision)
       .map((it) => `@${String(it.mapcode).replace(/^@+/, '')}`)
+  }
+
+  function getWillBeDiscussedItems(): QueueItem[] {
+    return state.items.filter((it) => it.decision === 'will_be_discussed')
+  }
+
+  function formatMapCodeForApi(mapcode: string): string {
+    const mc = String(mapcode).trim().replace(/^@+/, '')
+    return mc ? `@${mc}` : String(mapcode).trim()
   }
 
   function updateFinishReviewButtonState(): void {
@@ -798,6 +808,8 @@ export function initApp(root: HTMLElement): void {
     const canFinish = total > 0 && remaining === 0
     const missingMapcodes = getUnreviewedMapcodes()
     const isPublic = isPublicUser()
+    const discussItems = getWillBeDiscussedItems()
+    const hasAuthToken = Boolean((state.settings.authToken ?? '').trim())
 
     els.confirmFinishReview.style.display = 'grid'
     els.confirmFinishReview.innerHTML = `
@@ -846,6 +858,45 @@ export function initApp(root: HTMLElement): void {
               `
               : ''
           }
+          ${
+            discussItems.length
+              ? `
+                <div class="kv">
+                  <div class="k">Create forum discussions</div>
+                  <div class="v" style="display:flex; flex-direction:column; gap:8px;">
+                    <label class="row" style="gap: 8px; align-items: center;">
+                      <input id="frDiscussSelectAll" type="checkbox" checked ${hasAuthToken ? '' : 'disabled'} />
+                      <div class="wizardHint">Select all (${discussItems.length})</div>
+                    </label>
+                    <div class="discussMapList">
+                      ${discussItems
+                        .map(
+                          (it) => `
+                            <label class="discussMapRow" title="${it.author ? `author: ${it.author}` : ''}">
+                              <input
+                                class="frDiscussMap"
+                                type="checkbox"
+                                data-id="${it.id}"
+                                checked
+                                ${hasAuthToken ? '' : 'disabled'}
+                              />
+                              <span class="mono">${formatMapCodeForApi(it.mapcode)}</span>
+                              ${it.author ? `<span class="wizardHint">${it.author}</span>` : ''}
+                            </label>
+                          `,
+                        )
+                        .join('')}
+                    </div>
+                    ${
+                      hasAuthToken
+                        ? `<div class="wizardHint">Selected maps will open PERM discussions on Discord when you finish.</div>`
+                        : `<div class="wizardHint">Sign in (Auth token) to create forum discussions automatically.</div>`
+                    }
+                  </div>
+                </div>
+              `
+              : ''
+          }
           <div class="wizardHint">
             After finishing, the current session will be closed.
           </div>
@@ -870,6 +921,27 @@ export function initApp(root: HTMLElement): void {
     const frCancel = els.confirmFinishReview.querySelector<HTMLButtonElement>('#frCancel')!
     const frFinish = els.confirmFinishReview.querySelector<HTMLButtonElement>('#frFinish')
     const frPostAsPrivate = els.confirmFinishReview.querySelector<HTMLInputElement>('#frPostAsPrivate')
+    const frDiscussSelectAll = els.confirmFinishReview.querySelector<HTMLInputElement>('#frDiscussSelectAll')
+    const frDiscussMapChecks = Array.from(
+      els.confirmFinishReview.querySelectorAll<HTMLInputElement>('.frDiscussMap'),
+    )
+
+    const syncDiscussSelectAll = () => {
+      if (!frDiscussSelectAll || !frDiscussMapChecks.length) return
+      const checkedCount = frDiscussMapChecks.filter((cb) => cb.checked).length
+      frDiscussSelectAll.checked = checkedCount === frDiscussMapChecks.length
+      frDiscussSelectAll.indeterminate = checkedCount > 0 && checkedCount < frDiscussMapChecks.length
+    }
+
+    frDiscussSelectAll?.addEventListener('change', () => {
+      const checked = Boolean(frDiscussSelectAll.checked)
+      for (const cb of frDiscussMapChecks) cb.checked = checked
+      frDiscussSelectAll.indeterminate = false
+    })
+
+    for (const cb of frDiscussMapChecks) {
+      cb.addEventListener('change', () => syncDiscussSelectAll())
+    }
 
     const close = () => {
       els.confirmFinishReview.style.display = 'none'
@@ -886,11 +958,49 @@ export function initApp(root: HTMLElement): void {
           return
         }
 
+        const selectedDiscussIds = new Set(
+          frDiscussMapChecks.filter((cb) => cb.checked).map((cb) => cb.dataset.id ?? '').filter(Boolean),
+        )
+        const mapsToDiscuss = discussItems
+          .filter((it) => selectedDiscussIds.has(it.id))
+          .map((it) => formatMapCodeForApi(it.mapcode))
+
         const path = await openExportSaveDialog(getDefaultSessionExportFileName())
         if (!path) return // usuário cancelou o save dialog -> continua no modal
         const payload = buildExportPayloadV1(state, undefined, { includeXml: false })
         const finalPath = await exportJsonToPath(path, payload)
         close()
+
+        const authToken = (state.settings.authToken ?? '').trim()
+        const discussionResults: Array<{
+          mapcode: string
+          ok: boolean
+          status: number
+          jumpUrl?: string | null
+          error?: string | null
+        }> = []
+
+        if (mapsToDiscuss.length && authToken) {
+          for (const mapCode of mapsToDiscuss) {
+            try {
+              const res = await createDiscussion(authToken, mapCode, category, 'PERM', true)
+              discussionResults.push({
+                mapcode: mapCode,
+                ok: Boolean(res?.ok),
+                status: Number(res?.status ?? 0),
+                jumpUrl: res?.data?.jumpUrl ?? null,
+                error: (res?.error ?? res?.data?.error ?? null) as string | null,
+              })
+            } catch (e) {
+              discussionResults.push({
+                mapcode: mapCode,
+                ok: false,
+                status: 0,
+                error: String(e),
+              })
+            }
+          }
+        }
 
         // envia review para Discord Session API (best effort)
         let submitOk = false
@@ -924,6 +1034,7 @@ export function initApp(root: HTMLElement): void {
           message: submitMsg,
           category,
           filePath: finalPath,
+          discussionResults,
         })
       } catch (e) {
         setStatus(`Failed to finish review: ${String(e)}`)
@@ -937,6 +1048,13 @@ export function initApp(root: HTMLElement): void {
     message: string | null
     category: string
     filePath: string
+    discussionResults?: Array<{
+      mapcode: string
+      ok: boolean
+      status: number
+      jumpUrl?: string | null
+      error?: string | null
+    }>
   }): void {
     els.submitReviewResult.style.display = 'grid'
     const title = args.ok ? 'Review submitted' : 'Failed to submit review'
@@ -965,6 +1083,29 @@ export function initApp(root: HTMLElement): void {
             <div class="k">File</div>
             <div class="v">${basename(args.filePath)}</div>
           </div>
+          ${
+            args.discussionResults?.length
+              ? `
+                <div class="kv">
+                  <div class="k">Forum discussions</div>
+                  <div class="v discussResultList">
+                    ${args.discussionResults
+                      .map((r) => {
+                        const statusLabel = r.ok ? 'created' : `failed (${r.status || '-'})`
+                        const link = r.ok && r.jumpUrl
+                          ? ` <a href="${r.jumpUrl}" target="_blank" rel="noopener noreferrer">open</a>`
+                          : ''
+                        const err = !r.ok && r.error
+                          ? `<div class="wizardHint" style="margin-top:2px;">${String(r.error)}</div>`
+                          : ''
+                        return `<div class="discussResultRow"><span class="mono">${r.mapcode}</span> — ${statusLabel}${link}${err}</div>`
+                      })
+                      .join('')}
+                  </div>
+                </div>
+              `
+              : ''
+          }
           ${
             args.message
               ? `<div class="wizardHint" style="white-space: pre-wrap; word-break: break-word; margin-top: 10px;">${String(args.message)}</div>`
