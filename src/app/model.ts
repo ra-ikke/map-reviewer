@@ -12,6 +12,8 @@ export interface QueueItem {
   author?: string | null
   xml?: string | null
   p?: number | null
+  mapCategory?: string | null
+  imageUrl?: string | null
   submitter?: string | null
   importedIgnored?: boolean | null
   importedReason?: string | null
@@ -83,5 +85,5 @@ export const DEFAULT_SETTINGS: Settings = {
   authUserId: null,
 }
 
-export const APP_VERSION = '1.0.11'
+export const APP_VERSION = '1.0.14'
 

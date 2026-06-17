@@ -1,5 +1,6 @@
 import { normalizeMapcode, parseMapcodesFromText, uniqPreserveOrder } from './mapcodes'
 import { APP_VERSION, type AppState, type QueueItem } from './model'
+import { RELEASE_NOTES } from './release-notes'
 import { loadState, saveState } from './storage'
 import { buildExportPayloadV1 } from './export'
 import { CATEGORIES, REVIEW_CATEGORIES, parseCategoryNumber, type ReviewedCategoryCode } from './categories'
@@ -7,6 +8,10 @@ import {
   exportJsonToPath,
   validateAuthToken,
   fetchMapInfo,
+  fetchLiveMapInfo,
+  fetchLiveMapImageUrl,
+  buildLiveMapPageUrl,
+  type LiveMapInfoResponse,
   fetchSessionFromApi,
   submitSessionReview,
   createDiscussion,
@@ -59,6 +64,8 @@ function createItem(mapcode: string): QueueItem {
     author: null,
     xml: null,
     p: null,
+    mapCategory: null,
+    imageUrl: null,
     submitter: null,
     importedIgnored: null,
     importedReason: null,
@@ -109,7 +116,8 @@ export function initApp(root: HTMLElement): void {
   let authed = false
   let authStatusMsg = ''
   let authAutoTried = false
-  let updaterAutoTried = false
+  let updaterBootChecked = false
+  let updaterChecking = false
   let runtimeVersion = APP_VERSION
 
   // Mass perm (local UI state)
@@ -243,6 +251,8 @@ export function initApp(root: HTMLElement): void {
     <div id="confirmLeave" class="wizardOverlay" style="display:none"></div>
     <div id="confirmFinishReview" class="wizardOverlay" style="display:none"></div>
     <div id="finishReviewProgress" class="wizardOverlay" style="display:none"></div>
+    <div id="sessionHydrateProgress" class="wizardOverlay" style="display:none"></div>
+    <div id="mapPreviewModal" class="wizardOverlay" style="display:none"></div>
     <div id="submitReviewResult" class="wizardOverlay" style="display:none"></div>
     <div id="updateModal" class="wizardOverlay" style="display:none"></div>
     <div id="authOverlay" class="wizardOverlay" style="display:none"></div>
@@ -250,6 +260,7 @@ export function initApp(root: HTMLElement): void {
     <div id="aboutModal" class="wizardOverlay" style="display:none"></div>
     <div id="hotkeysModal" class="wizardOverlay" style="display:none"></div>
     <div id="customCommand" class="wizardOverlay" style="display:none"></div>
+    <div id="toastHost" class="toastHost" aria-live="polite"></div>
   `
 
   const els = {
@@ -284,6 +295,8 @@ export function initApp(root: HTMLElement): void {
     confirmLeave: root.querySelector<HTMLDivElement>('#confirmLeave')!,
     confirmFinishReview: root.querySelector<HTMLDivElement>('#confirmFinishReview')!,
     finishReviewProgress: root.querySelector<HTMLDivElement>('#finishReviewProgress')!,
+    sessionHydrateProgress: root.querySelector<HTMLDivElement>('#sessionHydrateProgress')!,
+    mapPreviewModal: root.querySelector<HTMLDivElement>('#mapPreviewModal')!,
     submitReviewResult: root.querySelector<HTMLDivElement>('#submitReviewResult')!,
     updateModal: root.querySelector<HTMLDivElement>('#updateModal')!,
     aboutModal: root.querySelector<HTMLDivElement>('#aboutModal')!,
@@ -292,6 +305,7 @@ export function initApp(root: HTMLElement): void {
     authOverlay: root.querySelector<HTMLDivElement>('#authOverlay')!,
     confirmMassPermLeave: root.querySelector<HTMLDivElement>('#confirmMassPermLeave')!,
     settings: root.querySelector<HTMLDivElement>('.settings')!,
+    toastHost: root.querySelector<HTMLDivElement>('#toastHost')!,
   }
 
   async function hydrateAppVersion(): Promise<void> {
@@ -304,6 +318,41 @@ export function initApp(root: HTMLElement): void {
     } catch {
       // fallback to static APP_VERSION when not running in Tauri
     }
+  }
+
+  function escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+  }
+
+  function renderReleaseNotesHtml(): string {
+    return RELEASE_NOTES.map((section) => {
+      const items = section.items
+        .map((item) => `<li>${escapeHtml(item)}</li>`)
+        .join('')
+      return `
+        <div class="authWhatsNewSection">
+          <div class="authWhatsNewTitle">${escapeHtml(section.title)}</div>
+          <ul class="authWhatsNewList">${items}</ul>
+        </div>
+      `
+    }).join('')
+  }
+
+  function showToast(message: string, kind: 'info' | 'error' = 'info'): void {
+    const toast = document.createElement('div')
+    toast.className = `toast ${kind}`
+    toast.textContent = message
+    els.toastHost.appendChild(toast)
+
+    const dismissMs = kind === 'error' ? 5000 : 3500
+    window.setTimeout(() => {
+      toast.classList.add('toastOut')
+      window.setTimeout(() => toast.remove(), 200)
+    }, dismissMs)
   }
 
   function setStatus(msg: string): void {
@@ -397,6 +446,160 @@ export function initApp(root: HTMLElement): void {
     els.finishReviewProgress.innerHTML = ''
   }
 
+  function openSessionHydrateModal(): void {
+    els.sessionHydrateProgress.style.display = 'grid'
+    els.sessionHydrateProgress.innerHTML = `
+      <div class="wizardCard finishProgressCard">
+        <div class="wizardHeader">
+          <div>
+            <div class="wizardTitle">Loading review session</div>
+            <div class="wizardHint">Fetching map data for your queue.</div>
+          </div>
+        </div>
+        <div class="wizardBody finishProgressBody">
+          <div class="finishProgressSpinner" aria-hidden="true"></div>
+          <div class="finishProgressStep" id="shpStep">Starting...</div>
+          <div class="finishProgressDetail wizardHint" id="shpDetail"></div>
+        </div>
+      </div>
+    `
+  }
+
+  function updateSessionHydrateProgress(step: string, detail = ''): void {
+    const stepEl = els.sessionHydrateProgress.querySelector<HTMLDivElement>('#shpStep')
+    const detailEl = els.sessionHydrateProgress.querySelector<HTMLDivElement>('#shpDetail')
+    if (stepEl) stepEl.textContent = step
+    if (detailEl) detailEl.textContent = detail
+  }
+
+  function closeSessionHydrateModal(): void {
+    els.sessionHydrateProgress.style.display = 'none'
+    els.sessionHydrateProgress.innerHTML = ''
+  }
+
+  function mapIdFromMapcode(mapcode: string): number | null {
+    const id = Number.parseInt(String(mapcode).replace(/^@+/, ''), 10)
+    return Number.isFinite(id) && id > 0 ? id : null
+  }
+
+  function getItemsByMapId(mapId: number): QueueItem[] {
+    const mc = String(mapId)
+    return state.items.filter((it) => String(it.mapcode).replace(/^@+/, '') === mc)
+  }
+
+  function applyLiveMapInfoToItems(mapId: number, live: LiveMapInfoResponse): void {
+    const matches = getItemsByMapId(mapId)
+    if (!matches.length) return
+    const content = live.content
+    const category = String(content?.category ?? '').trim()
+    const pNum = category ? parseCategoryNumber(category) : null
+    for (const it of matches) {
+      if (content?.author) it.author = content.author
+      if (content?.xml) it.xml = content.xml
+      if (category) it.mapCategory = category
+      if (pNum != null) it.p = pNum
+      if (live.imageUrl) it.imageUrl = live.imageUrl
+      it.updatedAt = nowIso()
+    }
+  }
+
+  async function refreshMapFromLiveApi(mapcode: string, sourceLabel: string): Promise<boolean> {
+    const mapId = mapIdFromMapcode(mapcode)
+    if (!mapId) {
+      showToast('Invalid mapcode.', 'error')
+      return false
+    }
+    try {
+      const live = await fetchLiveMapInfo(String(mapId))
+      applyLiveMapInfoToItems(mapId, live)
+      persist()
+      updateDetailsValues()
+      setStatus(`Map data updated (${sourceLabel}): @${mapId}`)
+      return true
+    } catch (e) {
+      showToast(`Failed to refresh map data: ${String(e)}`, 'error')
+      return false
+    }
+  }
+
+  function openMapPreviewModal(args: { mapcode: string; pageUrl: string; imageUrl: string | null }): void {
+    els.mapPreviewModal.style.display = 'grid'
+    const mapLabel = `@${String(args.mapcode).replace(/^@+/, '')}`
+    const imgBlock = args.imageUrl
+      ? `<img class="mapPreviewImage" src="${escapeHtml(args.imageUrl)}" alt="Map preview ${escapeHtml(mapLabel)}" />`
+      : `<div class="wizardHint">No preview image available.</div>`
+
+    els.mapPreviewModal.innerHTML = `
+      <div class="wizardCard mapPreviewCard">
+        <div class="wizardHeader">
+          <div>
+            <div class="wizardTitle">Map preview</div>
+            <div class="wizardHint mono">${escapeHtml(mapLabel)}</div>
+          </div>
+        </div>
+        <div class="wizardBody mapPreviewBody">
+          ${imgBlock}
+          <div class="kv">
+            <div class="k">URL</div>
+            <div class="v mono mapPreviewUrl">${escapeHtml(args.pageUrl)}</div>
+          </div>
+        </div>
+        <div class="wizardFooter">
+          <div class="wizardFooterLeft">
+            <button class="btn" id="mapPreviewCopyUrl">Copy URL</button>
+          </div>
+          <div class="wizardFooterRight">
+            <button class="btn primary" id="mapPreviewClose">Close</button>
+          </div>
+        </div>
+      </div>
+    `
+
+    const close = () => {
+      els.mapPreviewModal.style.display = 'none'
+      els.mapPreviewModal.innerHTML = ''
+    }
+
+    els.mapPreviewModal.querySelector<HTMLButtonElement>('#mapPreviewClose')?.addEventListener('click', () => close())
+    els.mapPreviewModal.querySelector<HTMLButtonElement>('#mapPreviewCopyUrl')?.addEventListener('click', async () => {
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(args.pageUrl)
+        } else {
+          await writeClipboardText(args.pageUrl)
+        }
+        showToast('Map URL copied.')
+      } catch (e) {
+        showToast(`Failed to copy URL: ${String(e)}`, 'error')
+      }
+    })
+  }
+
+  async function openMapPreviewForMapcode(mapcode: string): Promise<void> {
+    const id = String(mapcode).replace(/^@+/, '')
+    const pageUrl = buildLiveMapPageUrl(id)
+    let imageUrl = getItemsByMapId(Number.parseInt(id, 10)).find((it) => it.imageUrl)?.imageUrl ?? null
+
+    if (!imageUrl) {
+      try {
+        imageUrl = await fetchLiveMapImageUrl(id)
+      } catch {
+        try {
+          const live = await fetchLiveMapInfo(id)
+          imageUrl = live.imageUrl ?? null
+          const mapId = mapIdFromMapcode(id)
+          if (mapId) applyLiveMapInfoToItems(mapId, live)
+          persist()
+          updateDetailsValues()
+        } catch {
+          imageUrl = null
+        }
+      }
+    }
+
+    openMapPreviewModal({ mapcode: id, pageUrl, imageUrl })
+  }
+
   function updateFinishReviewButtonState(): void {
     // Only relevant when a session is active (button is hidden otherwise)
     if (!state.session) return
@@ -425,6 +628,8 @@ export function initApp(root: HTMLElement): void {
       els.confirmLeave.style.display = 'none'
       els.confirmFinishReview.style.display = 'none'
       els.finishReviewProgress.style.display = 'none'
+      els.sessionHydrateProgress.style.display = 'none'
+      els.mapPreviewModal.style.display = 'none'
       els.submitReviewResult.style.display = 'none'
       els.updateModal.style.display = 'none'
       els.confirmMassPermLeave.style.display = 'none'
@@ -549,16 +754,27 @@ export function initApp(root: HTMLElement): void {
     closeBtn.addEventListener('click', () => close())
   }
 
-  async function checkForUpdatesOnBoot(): Promise<void> {
-    if (updaterAutoTried) return
-    updaterAutoTried = true
+  async function runUpdateCheck(source: 'boot' | 'manual'): Promise<void> {
     try {
       const upd = await checkForUpdate()
-      if (!upd) return
-      openUpdateModal({ version: upd.version, body: upd.body })
-    } catch {
-      // silent (best effort)
+      if (upd) {
+        openUpdateModal({ version: upd.version, body: upd.body })
+        return
+      }
+      if (source === 'manual') {
+        showToast(`You are up to date (v${runtimeVersion}).`)
+      }
+    } catch (e) {
+      if (source === 'manual') {
+        showToast(`Failed to check updates: ${String(e)}`, 'error')
+      }
     }
+  }
+
+  async function checkForUpdatesOnBoot(): Promise<void> {
+    if (updaterBootChecked) return
+    updaterBootChecked = true
+    await runUpdateCheck('boot')
   }
 
   function renderAuth(): void {
@@ -569,10 +785,14 @@ export function initApp(root: HTMLElement): void {
         <div class="wizardHeader">
           <div>
             <div class="wizardTitle">Authentication</div>
-            <div class="wizardHint">Enter your token to access the app.</div>
+            <div class="wizardHint">Maps Reviewer · v${escapeHtml(runtimeVersion)}</div>
           </div>
         </div>
         <div class="wizardBody">
+          <div class="kv authWhatsNew">
+            <div class="k">What's New</div>
+            <div class="v authWhatsNewBody">${renderReleaseNotesHtml()}</div>
+          </div>
           <div class="kv">
             <div class="k">Token</div>
             <div class="v">
@@ -608,7 +828,7 @@ export function initApp(root: HTMLElement): void {
         </div>
         <div class="wizardFooter">
           <div class="wizardFooterLeft">
-            <button class="btn" id="authCheckUpdates">Check for updates</button>
+            <button class="btn" id="authCheckUpdates" ${updaterChecking ? 'disabled' : ''}>${updaterChecking ? 'Checking…' : 'Check for updates'}</button>
           </div>
           <div class="wizardFooterRight">
             <button class="btn primary" id="authContinue" ${authed ? '' : 'disabled'}>Continue</button>
@@ -682,25 +902,14 @@ export function initApp(root: HTMLElement): void {
     })
 
     checkUpdatesBtn.addEventListener('click', async () => {
-      if (authBusy) return
-      checkUpdatesBtn.disabled = true
-      authStatusMsg = 'Checking for updates…'
+      if (authBusy || updaterChecking) return
+      updaterChecking = true
       renderAuth()
       try {
-        const upd = await checkForUpdate()
-        if (!upd) {
-          authStatusMsg = 'You are up to date.'
-          renderAuth()
-          return
-        }
-        authStatusMsg = ''
-        renderAuth()
-        openUpdateModal({ version: upd.version, body: upd.body })
-      } catch (e) {
-        authStatusMsg = `Failed to check updates: ${String(e)}`
-        renderAuth()
+        await runUpdateCheck('manual')
       } finally {
-        // button will be recreated on renderAuth()
+        updaterChecking = false
+        renderAuth()
       }
     })
 
@@ -722,7 +931,6 @@ export function initApp(root: HTMLElement): void {
     render()
     syncNp()
     setShellVisible(true)
-    void checkForUpdatesOnBoot()
 
     // se já existe sessão salva, trava categoria
     if (state.session?.category) {
@@ -1208,39 +1416,17 @@ export function initApp(root: HTMLElement): void {
     syncNp()
   }
 
-  function addMapcodes(mapcodes: string[], sourceLabel: string): void {
+  function addMapcodes(mapcodes: string[], sourceLabel: string, opts?: { hydrateWithLoading?: boolean }): void {
     const normalized = uniqPreserveOrder(mapcodes)
     if (!normalized.length) {
       setStatus('Nothing to add.')
       return
     }
-
-    const existing = new Set(state.items.map((i) => i.mapcode))
-    const toAdd: string[] = []
-    for (const mc of normalized) {
-      if (state.settings.dedupe && existing.has(mc)) continue
-      toAdd.push(mc)
-    }
-
-    const addedItems: QueueItem[] = []
-    for (const mc of toAdd) {
-      const it = createItem(mc)
-      state.items.push(it)
-      addedItems.push(it)
-    }
-
-    if (!state.selectedId && state.items.length > 0) {
-      state.selectedId = state.items[0]!.id
-    }
-
-    persist()
-    render()
-    syncNp()
-    setStatus(`Added ${toAdd.length} mapcode(s) (${sourceLabel}).`)
-
-    void hydrateMapInfoForItems(addedItems).catch(() => {
-      // best effort
-    })
+    addItems(
+      normalized.map((mapcode) => ({ mapcode })),
+      sourceLabel,
+      { hydrateWithLoading: opts?.hydrateWithLoading },
+    )
   }
 
   function normalizeCategorySelection(codeOrNumber: string): { code: string; number: number | null } {
@@ -2223,10 +2409,14 @@ export function initApp(root: HTMLElement): void {
     })
   }
 
-  function addItems(items: Array<Pick<QueueItem, 'mapcode'> & Partial<QueueItem>>, sourceLabel: string): void {
+  function addItems(
+    items: Array<Pick<QueueItem, 'mapcode'> & Partial<QueueItem>>,
+    sourceLabel: string,
+    opts?: { skipHydrate?: boolean; hydrateWithLoading?: boolean; hydrateInitialStep?: string },
+  ): QueueItem[] {
     if (!items.length) {
       setStatus('Nothing to add.')
-      return
+      return []
     }
 
     const existing = new Set(state.items.map((i) => i.mapcode))
@@ -2235,7 +2425,6 @@ export function initApp(root: HTMLElement): void {
       const normalized = normalizeMapcode(raw.mapcode)
       if (!normalized) continue
       if (state.settings.dedupe && existing.has(normalized)) {
-        // Allow duplicates when they come from different submitters (same mapcode can be submitted by different people).
         const submitter = typeof raw.submitter === 'string' ? raw.submitter.trim() : ''
         if (!submitter) continue
         const alreadyHasSameSubmitter = state.items.some((it) => it.mapcode === normalized && (it.submitter ?? '') === submitter)
@@ -2256,73 +2445,124 @@ export function initApp(root: HTMLElement): void {
     syncNp()
     setStatus(`Added ${toAdd.length} mapcode(s) (${sourceLabel}).`)
 
-    void hydrateMapInfoForItems(toAdd).catch(() => {
-      // best effort
-    })
+    if (!opts?.skipHydrate && toAdd.length) {
+      void hydrateMapInfoForItems(toAdd, {
+        showLoading: Boolean(opts?.hydrateWithLoading),
+        initialStep: opts?.hydrateInitialStep,
+      }).catch(() => {
+        // best effort
+      })
+    }
+
+    return toAdd
   }
 
-  async function hydrateMapInfoForItems(items: QueueItem[]): Promise<void> {
-    // pega IDs sem "@"
+  async function hydrateMapInfoForItems(
+    items: QueueItem[],
+    opts?: { showLoading?: boolean; initialStep?: string; onProgress?: (step: string, detail?: string) => void },
+  ): Promise<void> {
     const ids = uniqPreserveOrder(
       items
-        .map((it) => Number.parseInt(String(it.mapcode).replace(/^@+/, ''), 10))
-        .filter((n) => Number.isFinite(n) && n > 0)
+        .map((it) => mapIdFromMapcode(it.mapcode))
+        .filter((n): n is number => n != null)
         .map((n) => String(n)),
     ).map((s) => Number.parseInt(s, 10))
 
     if (!ids.length) return
 
-    // If there are duplicates, first propagate existing info among them.
-    const byId = new Map<number, QueueItem[]>()
-    for (const it of state.items) {
-      const id = Number.parseInt(String(it.mapcode).replace(/^@+/, ''), 10)
-      if (!Number.isFinite(id) || id <= 0) continue
-      const arr = byId.get(id) ?? []
-      arr.push(it)
-      byId.set(id, arr)
-    }
-
-    for (const id of ids) {
-      const group = byId.get(id) ?? []
-      if (!group.length) continue
-      const donor = group.find((x) => x.xml || x.author || x.p != null)
-      if (!donor) continue
-      for (const it of group) {
-        if (!it.author && donor.author) it.author = donor.author
-        if (!it.xml && donor.xml) it.xml = donor.xml
-        if (it.p == null && donor.p != null) it.p = donor.p
+    const progress = (step: string, detail = '') => {
+      if (opts?.onProgress) {
+        opts.onProgress(step, detail)
+        return
       }
+      if (opts?.showLoading) updateSessionHydrateProgress(step, detail)
     }
 
-    // Avoid refetch only when all items for that map id already have author+xml.
-    const missing = ids.filter((id) => {
-      const group = byId.get(id) ?? []
-      if (!group.length) return true
-      const hasAllXml = group.every((it) => Boolean(it.xml))
-      const hasAllAuthor = group.every((it) => Boolean(it.author))
-      return !(hasAllXml && hasAllAuthor)
-    })
-    if (!missing.length) return
+    const ownsModal = Boolean(opts?.showLoading && !opts?.onProgress)
+    if (ownsModal) {
+      openSessionHydrateModal()
+      progress(opts?.initialStep ?? 'Get map info from Cypher')
+      await tickUi()
+    } else if (opts?.initialStep) {
+      progress(opts.initialStep)
+      await tickUi()
+    }
 
-    const res = await fetchMapInfo(missing)
-    if (!res || res.error) return
-
-    for (const entry of res.data) {
-      const mc = String(entry.id)
-      // Apply to ALL items that match this mapcode (duplicates)
-      const matches = state.items.filter((x) => String(x.mapcode).replace(/^@+/, '') === mc)
-      if (!matches.length) continue
-      for (const it of matches) {
-        it.author = entry.author ?? null
-        it.xml = entry.xml ?? null
-        it.p = typeof entry.p === 'number' ? entry.p : null
-        it.updatedAt = nowIso()
+    try {
+      const byId = new Map<number, QueueItem[]>()
+      for (const it of state.items) {
+        const id = mapIdFromMapcode(it.mapcode)
+        if (!id) continue
+        const arr = byId.get(id) ?? []
+        arr.push(it)
+        byId.set(id, arr)
       }
-    }
 
-    persist()
-    // Atualiza UI se o selecionado ganhou dados
-    updateDetailsValues()
+      for (const id of ids) {
+        const group = byId.get(id) ?? []
+        if (!group.length) continue
+        const donor = group.find((x) => x.xml || x.author || x.p != null)
+        if (!donor) continue
+        for (const it of group) {
+          if (!it.author && donor.author) it.author = donor.author
+          if (!it.xml && donor.xml) it.xml = donor.xml
+          if (it.p == null && donor.p != null) it.p = donor.p
+          if (!it.mapCategory && donor.mapCategory) it.mapCategory = donor.mapCategory
+          if (!it.imageUrl && donor.imageUrl) it.imageUrl = donor.imageUrl
+        }
+      }
+
+      const missingAfterPropagate = ids.filter((id) => {
+        const group = byId.get(id) ?? []
+        if (!group.length) return true
+        const hasAllXml = group.every((it) => Boolean(it.xml))
+        const hasAllAuthor = group.every((it) => Boolean(it.author))
+        return !(hasAllXml && hasAllAuthor)
+      })
+
+      if (missingAfterPropagate.length) {
+        progress('Get map info from Cypher')
+        await tickUi()
+        const res = await fetchMapInfo(missingAfterPropagate)
+        if (res && !res.error) {
+          for (const entry of res.data) {
+            const mc = String(entry.id)
+            const matches = state.items.filter((x) => String(x.mapcode).replace(/^@+/, '') === mc)
+            for (const it of matches) {
+              it.author = entry.author ?? null
+              it.xml = entry.xml ?? null
+              it.p = typeof entry.p === 'number' ? entry.p : null
+              it.updatedAt = nowIso()
+            }
+          }
+        }
+      }
+
+      const missingLive = ids.filter((id) => {
+        const group = byId.get(id) ?? getItemsByMapId(id)
+        if (!group.length) return true
+        const hasAllXml = group.every((it) => Boolean(it.xml))
+        const hasAllAuthor = group.every((it) => Boolean(it.author))
+        return !(hasAllXml && hasAllAuthor)
+      })
+
+      for (const id of missingLive) {
+        progress('Get map info', `@${id}`)
+        await tickUi()
+        try {
+          const live = await fetchLiveMapInfo(String(id))
+          applyLiveMapInfoToItems(id, live)
+        } catch {
+          // best effort per map
+        }
+      }
+
+      persist()
+      updateDetailsValues()
+      renderQueue()
+    } finally {
+      if (ownsModal) closeSessionHydrateModal()
+    }
   }
 
   function basename(path: string): string {
@@ -2497,10 +2737,15 @@ export function initApp(root: HTMLElement): void {
 
       <div class="kv">
         <div class="k">Author</div>
-        <div class="row" style="justify-content: space-between; align-items: center;">
+        <div class="row" style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
           <div class="v"><span id="d_author">—</span></div>
-          <button class="btn" id="copyXml">Copy XML</button>
+          <div class="row" style="gap: 8px; flex-wrap: wrap;">
+            <button class="btn" id="refreshMapData">Refresh map data</button>
+            <button class="btn" id="mapPreviewBtn">Map preview</button>
+            <button class="btn" id="copyXml">Copy XML</button>
+          </div>
         </div>
+        <div class="status" id="d_mapCategory"></div>
         <div class="status" id="d_xmlStatus"></div>
       </div>
 
@@ -2523,6 +2768,8 @@ export function initApp(root: HTMLElement): void {
     const reviewCounter = els.details.querySelector<HTMLDivElement>('#reviewCounter')!
     const decisionSelect = els.details.querySelector<HTMLSelectElement>('#decisionSelect')!
     const copyXml = els.details.querySelector<HTMLButtonElement>('#copyXml')!
+    const refreshMapData = els.details.querySelector<HTMLButtonElement>('#refreshMapData')!
+    const mapPreviewBtn = els.details.querySelector<HTMLButtonElement>('#mapPreviewBtn')!
 
     const updateReviewCounter = (value: string) => {
       if (!reviewCounter) return
@@ -2545,6 +2792,28 @@ export function initApp(root: HTMLElement): void {
         setStatus('XML copied to clipboard.')
       } catch (e) {
         setStatus(`Failed to copy XML: ${String(e)}`)
+      }
+    })
+
+    refreshMapData.addEventListener('click', async () => {
+      const selNow = getSelected()
+      if (!selNow) return
+      refreshMapData.disabled = true
+      try {
+        await refreshMapFromLiveApi(selNow.mapcode, 'manual refresh')
+      } finally {
+        refreshMapData.disabled = false
+      }
+    })
+
+    mapPreviewBtn.addEventListener('click', async () => {
+      const selNow = getSelected()
+      if (!selNow) return
+      mapPreviewBtn.disabled = true
+      try {
+        await openMapPreviewForMapcode(selNow.mapcode)
+      } finally {
+        mapPreviewBtn.disabled = false
       }
     })
 
@@ -2594,12 +2863,16 @@ export function initApp(root: HTMLElement): void {
     const reviewCounter = els.details.querySelector<HTMLDivElement>('#reviewCounter')
     const decisionSelect = els.details.querySelector<HTMLSelectElement>('#decisionSelect')
     const author = els.details.querySelector<HTMLSpanElement>('#d_author')
+    const mapCategory = els.details.querySelector<HTMLDivElement>('#d_mapCategory')
     const copyXml = els.details.querySelector<HTMLButtonElement>('#copyXml')
     const xmlStatus = els.details.querySelector<HTMLDivElement>('#d_xmlStatus')
 
     if (mapcode) mapcode.textContent = String(sel.mapcode).replace(/^@+/, '')
     if (submitter) submitter.textContent = sel.submitter ?? '—'
     if (author) author.textContent = sel.author ?? '—'
+    if (mapCategory) {
+      mapCategory.textContent = sel.mapCategory ? `Map category: ${sel.mapCategory}` : ''
+    }
     if (copyXml) copyXml.disabled = !sel.xml
     if (xmlStatus) xmlStatus.textContent = sel.xml ? `XML ready (p=${sel.p ?? '—'})` : 'Fetching XML…'
     if (decisionSelect && decisionSelect.value !== (sel.decision ?? '')) {
@@ -3090,6 +3363,8 @@ function normalizeHotkeyDisplay(value: string): string {
                   mapcode: String(it.mapcode),
                   author: typeof it.author === 'string' ? it.author : null,
                   xml: typeof it.xml === 'string' ? it.xml : null,
+                  mapCategory: typeof it.mapCategory === 'string' ? it.mapCategory : null,
+                  imageUrl: typeof it.imageUrl === 'string' ? it.imageUrl : null,
                   submitter: typeof it.submitter === 'string' ? it.submitter : null,
                   importedIgnored: typeof it.importedIgnored === 'boolean' ? it.importedIgnored : null,
                   importedReason: it.importedReason ?? null,
@@ -3108,7 +3383,10 @@ function normalizeHotkeyDisplay(value: string): string {
             detailsBoundId = null
             persist()
 
-            addItems(items, `session export: ${basename(path)}`)
+            addItems(items, `session export: ${basename(path)}`, {
+              hydrateWithLoading: true,
+              hydrateInitialStep: 'Loading session file...',
+            })
 
             // abre a tela de review imediatamente
             setShellVisible(true)
@@ -3156,7 +3434,10 @@ function normalizeHotkeyDisplay(value: string): string {
             }
             persist()
 
-            addItems(items, `session json: ${basename(path)}`)
+            addItems(items, `session json: ${basename(path)}`, {
+              hydrateWithLoading: true,
+              hydrateInitialStep: 'Loading session file...',
+            })
             void refreshGlobalHotkeys().catch(() => {
               // best effort
             })
@@ -3174,10 +3455,12 @@ function normalizeHotkeyDisplay(value: string): string {
 
   els.importFromApi.addEventListener('click', async () => {
     const categoryType = ((state.session?.category as ReviewedCategoryCode) || (els.apiCategory.value as ReviewedCategoryCode) || 'P3') as ReviewedCategoryCode
-    setStatus(`Fetching session (${categoryType})...`)
+    openSessionHydrateModal()
+    updateSessionHydrateProgress('Getting session info...')
     try {
       const res = await fetchSessionFromApi(categoryType)
       if (!res?.ok) {
+        closeSessionHydrateModal()
         const err = res?.error?.error || 'unknown_error'
         if (err === 'no_active_session') {
           setStatus(`No active session for ${categoryType}.`)
@@ -3193,11 +3476,11 @@ function normalizeHotkeyDisplay(value: string): string {
 
       const data = res.data
       if (!data) {
+        closeSessionHydrateModal()
         setStatus(`Session API returned no data (${categoryType}).`)
         return
       }
 
-      // grava metadados da sessão importada
       state.session = {
         category: String(data.category || categoryType),
         inputMethod: 'session_api',
@@ -3209,6 +3492,7 @@ function normalizeHotkeyDisplay(value: string): string {
       persist()
 
       if (!Array.isArray(data.maps) || data.maps.length === 0) {
+        closeSessionHydrateModal()
         setStatus(`No maps in session (${data.category}). threadId=${data.threadId}`)
         return
       }
@@ -3230,11 +3514,21 @@ function normalizeHotkeyDisplay(value: string): string {
           } satisfies Pick<QueueItem, 'mapcode'> & Partial<QueueItem>
         })
 
-      addItems(items, `api: ${data.category}`)
+      const toAdd = addItems(items, `api: ${data.category}`, { skipHydrate: true })
+      setShellVisible(true)
+      els.apiCategory.value = (data.category || categoryType) as any
+      els.apiCategory.disabled = true
+
+      await hydrateMapInfoForItems(toAdd, {
+        onProgress: (step, detail) => updateSessionHydrateProgress(step, detail ?? ''),
+      })
+      closeSessionHydrateModal()
+
       void refreshGlobalHotkeys().catch(() => {
         // best effort
       })
     } catch (e) {
+      closeSessionHydrateModal()
       setStatus(`Failed to fetch session (${categoryType}): ${String(e)}`)
     }
   })
@@ -3475,7 +3769,7 @@ function normalizeHotkeyDisplay(value: string): string {
           setLocalStatus('Nothing to import.')
           return
         }
-        addMapcodes(mapcodes, 'paste list')
+        addMapcodes(mapcodes, 'paste list', { hydrateWithLoading: true })
         els.wizard.style.display = 'none'
         launcherAllowReturnToSession = false
         setShellVisible(true)
@@ -3657,8 +3951,11 @@ function normalizeHotkeyDisplay(value: string): string {
 
   // inicialização (autenticação antes de mostrar o Home)
   setShellVisible(false)
-  renderAuth()
-  void hydrateAppVersion()
+  void (async () => {
+    await hydrateAppVersion()
+    renderAuth()
+    void checkForUpdatesOnBoot()
+  })()
 
   // hotkeys globais (best effort)
   void refreshGlobalHotkeys().catch(() => {

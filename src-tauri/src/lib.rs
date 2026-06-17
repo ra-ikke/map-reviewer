@@ -1297,6 +1297,82 @@ pub fn run() {
     Ok(CypherMapInfoResponse { error: false, data: out })
   }
 
+  // -------------------------
+  // Live map API (ikke-dev)
+  // -------------------------
+  const LIVE_MAP_API_BASE: &str = "https://www.ikke-dev.com.br";
+
+  fn normalize_map_code_input(map_code: &str) -> String {
+    let trimmed = map_code.trim().trim_start_matches('@');
+    trimmed.to_string()
+  }
+
+  #[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
+  struct LiveMapContent {
+    map: String,
+    author: String,
+    category: String,
+    xml: String,
+  }
+
+  #[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
+  struct LiveMapInfoResponse {
+    status: String,
+    content: LiveMapContent,
+    #[serde(rename = "imageUrl")]
+    image_url: Option<String>,
+    #[serde(rename = "categoryEmoji")]
+    category_emoji: Option<String>,
+  }
+
+  #[tauri::command]
+  fn fetch_live_map_info(map_code: String) -> Result<LiveMapInfoResponse, String> {
+    let id = normalize_map_code_input(&map_code);
+    if id.is_empty() {
+      return Err("empty mapcode".into());
+    }
+
+    let client = reqwest::blocking::Client::builder()
+      .timeout(StdDuration::from_secs(12))
+      .build()
+      .map_err(|e| e.to_string())?;
+
+    let url = format!("{LIVE_MAP_API_BASE}/map/@{id}");
+    let resp = client.get(url).send().map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+      return Err(format!("live map API HTTP {}", resp.status()));
+    }
+
+    let body = resp.text().map_err(|e| e.to_string())?;
+    serde_json::from_str::<LiveMapInfoResponse>(&body).map_err(|e| format!("invalid live map JSON: {e}"))
+  }
+
+  #[tauri::command]
+  fn fetch_live_map_image_url(map_code: String) -> Result<String, String> {
+    let id = normalize_map_code_input(&map_code);
+    if id.is_empty() {
+      return Err("empty mapcode".into());
+    }
+
+    let client = reqwest::blocking::Client::builder()
+      .timeout(StdDuration::from_secs(12))
+      .build()
+      .map_err(|e| e.to_string())?;
+
+    let url = format!("{LIVE_MAP_API_BASE}/map/{id}/image?format=url");
+    let resp = client.get(url).send().map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+      return Err(format!("live map image URL HTTP {}", resp.status()));
+    }
+
+    let text = resp.text().map_err(|e| e.to_string())?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+      return Err("empty image URL".into());
+    }
+    Ok(trimmed.to_string())
+  }
+
   #[tauri::command]
   fn set_np_context(ctx: NpContextUpdate, state: tauri::State<'_, NpContext>) -> Result<(), String> {
     *state
@@ -1556,6 +1632,8 @@ pub fn run() {
       write_clipboard_text,
       read_text_file,
       fetch_map_info,
+      fetch_live_map_info,
+      fetch_live_map_image_url,
       set_np_context,
       send_np_to_active_window,
       send_perm_to_active_window,

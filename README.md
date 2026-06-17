@@ -134,6 +134,34 @@ Push a **semver** tag to trigger `.github/workflows/tauri-release.yml` (e.g. `1.
 Valid tag examples: `1.0.13`, `v1.0.13`, `1.0.13-beta`, `v1.0.13-rc.1`.  
 Invalid: `1.0.13b` (use `1.0.13-beta` — prerelease must be separated with `-`).
 
+### Custom release notes (predictable)
+
+The release workflow now resolves notes in this order:
+
+1. `.github/releases/<tag>.md` (example: `.github/releases/1.0.13-beta.md`)
+2. `.github/releases/latest.md`
+3. If neither exists, GitHub auto-generated release notes are used.
+
+This body is what appears in the app updater modal as release notes (`What's New`).
+
+The login screen also shows the bundled release notes for the current app version (`src/app/release-notes.ts`). Update that file when shipping a new version.
+
+## Live map API
+
+During review, map metadata is loaded in two stages:
+
+1. **Cypher** (`cypher801.app/mapInfo`) — monthly database snapshot (batch).
+2. **Live map API** (`https://www.ikke-dev.com.br/map/@<mapcode>`) — current in-game data, fetched sequentially for maps missing from Cypher.
+
+No auth is required for the live map API. Endpoints used by the app:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /map/@<mapcode>` | Author, category, XML, `imageUrl` |
+| `GET /map/<mapcode>/image?format=url` | Direct preview image URL |
+
+In the review panel: **Refresh map data** (live API) and **Map preview** (URL + image).
+
 Releases require a **classic PAT** saved as repository secret `RELEASE_TOKEN` (scope `repo`). The workflow no longer relies on `GITHUB_TOKEN` for publishing.
 
 ### Configure `RELEASE_TOKEN`

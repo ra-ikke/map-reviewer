@@ -1,7 +1,7 @@
 {
   "name": "maps-reviewer-desktop",
   "private": true,
-  "version": "1.0.11",
+  "version": "1.0.14",
   "type": "module",
   "engines": {
     "node": ">=24"

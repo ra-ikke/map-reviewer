@@ -601,6 +601,107 @@ body.session-active #inputPanel {
   }
 }
 
+.toastHost {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 3000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgb(var(--panel-rgb) / 0.96);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+  max-width: min(360px, calc(100vw - 40px));
+  animation: toastIn 0.2s ease;
+}
+
+.toast.info {
+  border-left: 3px solid var(--primary);
+}
+
+.toast.error {
+  border-left: 3px solid var(--danger);
+}
+
+.toastOut {
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.authWhatsNew {
+  margin-bottom: 4px;
+}
+
+.authWhatsNewBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.authWhatsNewSection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.authWhatsNewTitle {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.authWhatsNewList {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mapPreviewCard {
+  width: min(560px, 100%);
+}
+
+.mapPreviewBody {
+  gap: 12px;
+}
+
+.mapPreviewImage {
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgb(var(--panel2-rgb) / 0.55);
+}
+
+.mapPreviewUrl {
+  word-break: break-all;
+  font-size: 12px;
+}
+
 @media (max-width: 1100px) {
   .main {
     grid-template-columns: 1fr;

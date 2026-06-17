@@ -279,6 +279,35 @@ export async function fetchMapInfo(mapIds: number[]): Promise<MapInfoResponse> {
   return await invoke<MapInfoResponse>('fetch_map_info', { mapIds })
 }
 
+export interface LiveMapContent {
+  map: string
+  author: string
+  category: string
+  xml: string
+}
+
+export interface LiveMapInfoResponse {
+  status: string
+  content: LiveMapContent
+  imageUrl?: string | null
+  categoryEmoji?: string | null
+}
+
+export const LIVE_MAP_PAGE_BASE = 'https://www.ikke-dev.com.br/map'
+
+export function buildLiveMapPageUrl(mapcode: string): string {
+  const id = String(mapcode).trim().replace(/^@+/, '')
+  return `${LIVE_MAP_PAGE_BASE}/@${id}`
+}
+
+export async function fetchLiveMapInfo(mapcode: string): Promise<LiveMapInfoResponse> {
+  return await invoke<LiveMapInfoResponse>('fetch_live_map_info', { mapCode: mapcode })
+}
+
+export async function fetchLiveMapImageUrl(mapcode: string): Promise<string> {
+  return await invoke<string>('fetch_live_map_image_url', { mapCode: mapcode })
+}
+
 // -------------------------
 // Updater (Tauri plugin)
 // -------------------------
