@@ -4,7 +4,7 @@ A desktop app (Tauri) to review/decide maps from a `mapcode` queue, with global 
 
 ## Requirements
 
-- **Node.js** (LTS) and **npm**
+- **Node.js** 24 LTS and **npm**
 - **Rust** (stable toolchain)
 - **Tauri v2** OS prerequisites (webview / native toolchain)
 
@@ -128,7 +128,10 @@ Artifacts are located at `maps-reviewer-desktop/src-tauri/target/release/bundle/
 
 ## GitHub Releases (CI)
 
-Push a semver tag (e.g. `1.0.12`) to trigger `.github/workflows/tauri-release.yml`. The workflow syncs the app version from the tag, builds for Linux/macOS/Windows, and publishes a GitHub Release with updater artifacts (`latest.json`, `.sig`).
+Push a **semver** tag to trigger `.github/workflows/tauri-release.yml` (e.g. `1.0.13` or `1.0.13-beta`). The workflow syncs the app version from the tag, builds for Linux/macOS/Windows, and publishes a GitHub Release with updater artifacts (`latest.json`, `.sig`).
+
+Valid tag examples: `1.0.13`, `v1.0.13`, `1.0.13-beta`, `v1.0.13-rc.1`.  
+Invalid: `1.0.13b` (use `1.0.13-beta` — prerelease must be separated with `-`).
 
 Releases require a **classic PAT** saved as repository secret `RELEASE_TOKEN` (scope `repo`). The workflow no longer relies on `GITHUB_TOKEN` for publishing.
 
@@ -149,5 +152,6 @@ Use a **classic** token. Fine-grained tokens often fail with Tauri/org repos.
 | `RELEASE_TOKEN is invalid or expired` | Regenerate the PAT and update the secret. |
 | `RELEASE_TOKEN cannot create releases` | Authorize SSO for the org; confirm your user has write access to the repo; use classic PAT with `repo` scope. |
 | `Resource not accessible by integration` | The publish step was still using `GITHUB_TOKEN` — pull the latest workflow (uses `RELEASE_TOKEN` + `softprops/action-gh-release`). |
+| `package > version must be a semver string` | Tag is not valid semver (e.g. `1.0.13b`). Re-tag as `1.0.13-beta` or push a fixed `sync-version-from-tag.mjs` and re-run the workflow. |
 
 The `Couldn't parse --config flag as inline JSON` message is harmless — the CLI falls back to the config file path.
