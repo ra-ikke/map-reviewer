@@ -114,6 +114,7 @@ export function initApp(root: HTMLElement): void {
   let massPermInFlight = false
   let massPermCategoryCode: string = 'P4'
   let massPermHotkeysEnabled = true
+  let reviewNavPlayQueue: Promise<void> = Promise.resolve()
   let massPermIntervalSec = 0.3
 
   // Custom command (local UI state)
@@ -234,6 +235,7 @@ export function initApp(root: HTMLElement): void {
     <div id="massPerm" class="wizardOverlay" style="display:none"></div>
     <div id="confirmLeave" class="wizardOverlay" style="display:none"></div>
     <div id="confirmFinishReview" class="wizardOverlay" style="display:none"></div>
+    <div id="finishReviewProgress" class="wizardOverlay" style="display:none"></div>
     <div id="submitReviewResult" class="wizardOverlay" style="display:none"></div>
     <div id="updateModal" class="wizardOverlay" style="display:none"></div>
     <div id="authOverlay" class="wizardOverlay" style="display:none"></div>
@@ -274,6 +276,7 @@ export function initApp(root: HTMLElement): void {
     massPerm: root.querySelector<HTMLDivElement>('#massPerm')!,
     confirmLeave: root.querySelector<HTMLDivElement>('#confirmLeave')!,
     confirmFinishReview: root.querySelector<HTMLDivElement>('#confirmFinishReview')!,
+    finishReviewProgress: root.querySelector<HTMLDivElement>('#finishReviewProgress')!,
     submitReviewResult: root.querySelector<HTMLDivElement>('#submitReviewResult')!,
     updateModal: root.querySelector<HTMLDivElement>('#updateModal')!,
     aboutModal: root.querySelector<HTMLDivElement>('#aboutModal')!,
@@ -352,6 +355,41 @@ export function initApp(root: HTMLElement): void {
     return mc ? `@${mc}` : String(mapcode).trim()
   }
 
+  async function tickUi(): Promise<void> {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  }
+
+  function openFinishReviewProgressModal(): void {
+    els.finishReviewProgress.style.display = 'grid'
+    els.finishReviewProgress.innerHTML = `
+      <div class="wizardCard finishProgressCard">
+        <div class="wizardHeader">
+          <div>
+            <div class="wizardTitle">Finishing review</div>
+            <div class="wizardHint">Please wait while the session is saved and sent to Discord.</div>
+          </div>
+        </div>
+        <div class="wizardBody finishProgressBody">
+          <div class="finishProgressSpinner" aria-hidden="true"></div>
+          <div class="finishProgressStep" id="frpStep">Starting...</div>
+          <div class="finishProgressDetail wizardHint" id="frpDetail"></div>
+        </div>
+      </div>
+    `
+  }
+
+  function updateFinishReviewProgress(step: string, detail = ''): void {
+    const stepEl = els.finishReviewProgress.querySelector<HTMLDivElement>('#frpStep')
+    const detailEl = els.finishReviewProgress.querySelector<HTMLDivElement>('#frpDetail')
+    if (stepEl) stepEl.textContent = step
+    if (detailEl) detailEl.textContent = detail
+  }
+
+  function closeFinishReviewProgressModal(): void {
+    els.finishReviewProgress.style.display = 'none'
+    els.finishReviewProgress.innerHTML = ''
+  }
+
   function updateFinishReviewButtonState(): void {
     // Only relevant when a session is active (button is hidden otherwise)
     if (!state.session) return
@@ -379,6 +417,7 @@ export function initApp(root: HTMLElement): void {
       els.customCommand.style.display = 'none'
       els.confirmLeave.style.display = 'none'
       els.confirmFinishReview.style.display = 'none'
+      els.finishReviewProgress.style.display = 'none'
       els.submitReviewResult.style.display = 'none'
       els.updateModal.style.display = 'none'
       els.confirmMassPermLeave.style.display = 'none'
@@ -967,9 +1006,14 @@ export function initApp(root: HTMLElement): void {
 
         const path = await openExportSaveDialog(getDefaultSessionExportFileName())
         if (!path) return // usuário cancelou o save dialog -> continua no modal
-        const payload = buildExportPayloadV1(state, undefined, { includeXml: false })
-        const finalPath = await exportJsonToPath(path, payload)
+
         close()
+        openFinishReviewProgressModal()
+
+        const payload = buildExportPayloadV1(state, undefined, { includeXml: false })
+        updateFinishReviewProgress('Saving session file...')
+        await tickUi()
+        const finalPath = await exportJsonToPath(path, payload)
 
         const authToken = (state.settings.authToken ?? '').trim()
         const discussionResults: Array<{
@@ -981,7 +1025,11 @@ export function initApp(root: HTMLElement): void {
         }> = []
 
         if (mapsToDiscuss.length && authToken) {
-          for (const mapCode of mapsToDiscuss) {
+          const total = mapsToDiscuss.length
+          for (let i = 0; i < total; i++) {
+            const mapCode = mapsToDiscuss[i]!
+            updateFinishReviewProgress(`Creating discussions (${i + 1} of ${total})`, mapCode)
+            await tickUi()
             try {
               const res = await createDiscussion(authToken, mapCode, category, 'PERM', true)
               discussionResults.push({
@@ -1001,6 +1049,9 @@ export function initApp(root: HTMLElement): void {
             }
           }
         }
+
+        updateFinishReviewProgress('Posting review to Discord...')
+        await tickUi()
 
         // envia review para Discord Session API (best effort)
         let submitOk = false
@@ -1024,6 +1075,7 @@ export function initApp(root: HTMLElement): void {
           submitMsg = String(e)
         }
 
+        closeFinishReviewProgressModal()
         endCurrentSession()
         openLauncher({ allowReturnToSession: false })
         setStatus(`Session saved: ${finalPath}`)
@@ -1037,6 +1089,7 @@ export function initApp(root: HTMLElement): void {
           discussionResults,
         })
       } catch (e) {
+        closeFinishReviewProgressModal()
         setStatus(`Failed to finish review: ${String(e)}`)
       }
     })
@@ -1448,7 +1501,7 @@ export function initApp(root: HTMLElement): void {
     mpHotkeys.addEventListener('change', async () => {
       massPermHotkeysEnabled = mpHotkeys.checked
       try {
-        await applyMassPermHotkeysConfig(massPermHotkeysEnabled)
+        await syncHotkeyOwnership()
         setMassPermStatus(`Hotkeys ${massPermHotkeysEnabled ? 'enabled' : 'disabled'}.`)
       } catch (e) {
         setMassPermStatus(`Failed to toggle hotkeys: ${String(e)}`)
@@ -1866,7 +1919,7 @@ export function initApp(root: HTMLElement): void {
     ccHotkeys.addEventListener('change', async () => {
       massPermHotkeysEnabled = ccHotkeys.checked
       try {
-        await applyMassPermHotkeysConfig(massPermHotkeysEnabled)
+        await syncHotkeyOwnership()
         setCustomCommandStatus(`Hotkeys ${massPermHotkeysEnabled ? 'enabled' : 'disabled'}.`)
       } catch (e) {
         setCustomCommandStatus(`Failed to toggle hotkeys: ${String(e)}`)
@@ -2141,7 +2194,7 @@ export function initApp(root: HTMLElement): void {
     els.massPerm.style.display = 'none'
     renderCustomCommand()
     setCustomCommandStatus('Load a list and enter a prefix.')
-    void applyMassPermHotkeysConfig(massPermHotkeysEnabled).catch(() => {
+    syncHotkeyOwnership().catch(() => {
       // best effort
     })
   }
@@ -2152,7 +2205,7 @@ export function initApp(root: HTMLElement): void {
     // mass perm pode rodar sem sessão; não força mostrar o shell
     renderMassPerm()
     setMassPermStatus('Load a list and choose a category.')
-    void applyMassPermHotkeysConfig(massPermHotkeysEnabled).catch(() => {
+    syncHotkeyOwnership().catch(() => {
       // best effort
     })
   }
@@ -2316,15 +2369,40 @@ export function initApp(root: HTMLElement): void {
     updateFinishReviewButtonState()
   }
 
-  function selectRelative(delta: number): void {
+  function ensureSelectionInVisibleQueue(): void {
     const visible = getVisibleQueueItems()
     if (!visible.length) return
-    const idx = indexOfSelected()
-    const base = idx >= 0 ? idx : 0
-    const len = visible.length
-    const raw = base + delta
-    const wrapped = ((raw % len) + len) % len
-    select(visible[wrapped]!.id)
+    if (!state.selectedId || !visible.some((i) => i.id === state.selectedId)) {
+      state.selectedId = visible[0]!.id
+      persist()
+    }
+  }
+
+  function resolveRelativeTarget(delta: number): QueueItem | null {
+    const visible = getVisibleQueueItems()
+    if (!visible.length) return null
+
+    let idx = indexOfSelected()
+    if (idx < 0) {
+      idx = delta > 0 ? -1 : visible.length
+    }
+
+    const nextIdx = ((idx + delta) % visible.length + visible.length) % visible.length
+    return visible[nextIdx] ?? null
+  }
+
+  function selectRelative(delta: number): void {
+    const target = resolveRelativeTarget(delta)
+    if (!target) return
+    select(target.id)
+  }
+
+  function syncHotkeyOwnership(): Promise<void> {
+    const massPermUiOpen = els.massPerm.style.display === 'grid' || els.customCommand.style.display === 'grid'
+    const useMassPermHotkeys = massPermUiOpen && massPermHotkeysEnabled && !state.session
+    return applyMassPermHotkeysConfig(useMassPermHotkeys).catch(() => {
+      // best effort
+    })
   }
 
   function renderQueue(): void {
@@ -2534,6 +2612,9 @@ export function initApp(root: HTMLElement): void {
     document.body.classList.toggle('session-active', Boolean(state.session))
     setSessionHeaderMode(Boolean(state.session))
     if (state.session) updateFinishReviewButtonState()
+    syncHotkeyOwnership().catch(() => {
+      // best effort
+    })
     const sessionCategory = state.session?.category
     const catColor =
       (sessionCategory ? REVIEW_CATEGORIES.find((c) => c.code === sessionCategory)?.color : null) ?? '#ff6a7b'
@@ -2839,21 +2920,55 @@ function normalizeHotkeyDisplay(value: string): string {
     els.hotkeysModal.focus?.()
   }
 
-  async function playSelected(sourceLabel: string): Promise<void> {
-    const sel = getSelected()
-    if (!sel) {
-      setStatus('No mapcode selected.')
-      return
-    }
+  async function playMapItem(item: QueueItem, sourceLabel: string): Promise<void> {
     try {
-      const cmd = await sendNpToActiveWindow({ mapcode: sel.mapcode, commandMode: state.settings.commandMode })
-      updateSelected((item) => {
-        item.commandsUsed.push(state.settings.commandMode)
-      })
+      const cmd = await sendNpToActiveWindow({ mapcode: item.mapcode, commandMode: state.settings.commandMode })
+      const stored = state.items.find((i) => i.id === item.id)
+      if (stored) {
+        stored.commandsUsed.push(state.settings.commandMode)
+        stored.updatedAt = nowIso()
+        persist()
+        if (state.selectedId === stored.id) updateDetailsValues()
+      }
       setStatus(`Sent (${sourceLabel}): ${cmd}`)
     } catch (e) {
       setStatus(`Failed to send (${sourceLabel}): ${String(e)}`)
     }
+  }
+
+  function enqueueReviewNavAction(task: () => Promise<void>): void {
+    reviewNavPlayQueue = reviewNavPlayQueue
+      .then(task)
+      .catch(() => {
+        // keep queue alive after failures
+      })
+  }
+
+  function navigateAndPlay(delta: number, sourceLabel: string): void {
+    if (!state.session) return
+    enqueueReviewNavAction(async () => {
+      ensureSelectionInVisibleQueue()
+      const target = resolveRelativeTarget(delta)
+      if (!target) {
+        setStatus('No mapcode in queue.')
+        return
+      }
+      select(target.id)
+      await playMapItem(target, sourceLabel)
+    })
+  }
+
+  function replayCurrentMap(sourceLabel: string): void {
+    if (!state.session) return
+    enqueueReviewNavAction(async () => {
+      ensureSelectionInVisibleQueue()
+      const sel = getSelected()
+      if (!sel) {
+        setStatus('No mapcode selected.')
+        return
+      }
+      await playMapItem(sel, sourceLabel)
+    })
   }
 
   els.commandMode.addEventListener('change', () =>
@@ -3409,6 +3524,9 @@ function normalizeHotkeyDisplay(value: string): string {
     // Se não há sessão ativa, não mostrar a página vazia ao fundo
     setShellVisible(Boolean(state.session))
     renderWizard(0, 'P3', 'session_api', 'session')
+    syncHotkeyOwnership().catch(() => {
+      // best effort
+    })
   }
 
   els.newSession.addEventListener('click', () => {
@@ -3522,12 +3640,11 @@ function normalizeHotkeyDisplay(value: string): string {
   })
 
   // eventos de hotkeys globais (best effort)
-  void onHotkeyReplayCurrent(() => void playSelected('hotkey: replay current')).catch(() => {
+  void onHotkeyReplayCurrent(() => replayCurrentMap('hotkey: replay current')).catch(() => {
     // best effort
   })
   void onHotkeyNavPlay((delta) => {
-    selectRelative(delta)
-    void playSelected(delta > 0 ? 'hotkey: next map' : 'hotkey: previous map')
+    navigateAndPlay(delta, delta > 0 ? 'hotkey: next map' : 'hotkey: previous map')
   }).catch(() => {
     // best effort
   })
@@ -3539,7 +3656,7 @@ function normalizeHotkeyDisplay(value: string): string {
 
   // hotkeys globais do mass perm (best effort)
   void onHotkeyMassPermToggle(() => {
-    if (!massPermHotkeysEnabled) return
+    if (!massPermHotkeysEnabled || state.session) return
     if (els.customCommand.style.display === 'grid') {
       const btn = els.customCommand.querySelector<HTMLButtonElement>('#ccToggle')
       btn?.click()
@@ -3553,7 +3670,7 @@ function normalizeHotkeyDisplay(value: string): string {
     // best effort
   })
   void onHotkeyMassPermPlayCurrent(() => {
-    if (!massPermHotkeysEnabled) return
+    if (!massPermHotkeysEnabled || state.session) return
     if (els.customCommand.style.display === 'grid') {
       const btn = els.customCommand.querySelector<HTMLButtonElement>('#ccPlayCurrent')
       btn?.click()
@@ -3567,7 +3684,7 @@ function normalizeHotkeyDisplay(value: string): string {
     // best effort
   })
   void onHotkeyMassPermNext(() => {
-    if (!massPermHotkeysEnabled) return
+    if (!massPermHotkeysEnabled || state.session) return
     if (els.customCommand.style.display === 'grid') {
       const btn = els.customCommand.querySelector<HTMLButtonElement>('#ccNext')
       btn?.click()
@@ -3581,7 +3698,7 @@ function normalizeHotkeyDisplay(value: string): string {
     // best effort
   })
   void onHotkeyMassPermPrev(() => {
-    if (!massPermHotkeysEnabled) return
+    if (!massPermHotkeysEnabled || state.session) return
     if (els.customCommand.style.display === 'grid') {
       const btn = els.customCommand.querySelector<HTMLButtonElement>('#ccPrev')
       btn?.click()

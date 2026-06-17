@@ -1021,6 +1021,18 @@ pub fn run() {
     }
   }
 
+  fn unregister_review_hotkeys(app: &tauri::AppHandle, reg: &HotkeyRegistry) -> Result<(), String> {
+    let prev = reg.prev_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
+    let next = reg.next_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
+    let replay = reg.replay_current.lock().map_err(|_| "hotkey lock poisoned")?.clone();
+
+    unregister_shortcut(app, &prev);
+    unregister_shortcut(app, &next);
+    unregister_shortcut(app, &replay);
+
+    Ok(())
+  }
+
   fn unregister_all_hotkeys(app: &tauri::AppHandle, reg: &HotkeyRegistry) -> Result<(), String> {
     let prev = reg.prev_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
     let next = reg.next_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
@@ -1353,8 +1365,8 @@ pub fn run() {
   ) -> Result<(), String> {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-    // troca hotkeys de forma idempotente
-    unregister_all_hotkeys(&app, &reg)?;
+    // troca hotkeys de review sem apagar config de mass perm
+    unregister_review_hotkeys(&app, &reg)?;
 
     let prev_accel = args.prev_map.as_deref().unwrap_or("PageUp").trim();
     let next_accel = args.next_map.as_deref().unwrap_or("PageDown").trim();
@@ -1489,7 +1501,26 @@ pub fn run() {
 
           let reg = app.state::<HotkeyRegistry>();
 
-          // mass perm hotkeys (funcionam independentemente do enabled toggle da sessão)
+          if reg.enabled.load(Ordering::SeqCst) {
+            let prev = reg.prev_map.lock().ok().and_then(|g| g.clone());
+            if prev.as_ref() == Some(shortcut) {
+              let _ = app.emit("hotkey_nav_play", serde_json::json!({ "delta": -1 }));
+              return;
+            }
+
+            let next = reg.next_map.lock().ok().and_then(|g| g.clone());
+            if next.as_ref() == Some(shortcut) {
+              let _ = app.emit("hotkey_nav_play", serde_json::json!({ "delta": 1 }));
+              return;
+            }
+
+            let replay = reg.replay_current.lock().ok().and_then(|g| g.clone());
+            if replay.as_ref() == Some(shortcut) {
+              let _ = app.emit("hotkey_replay_current", ());
+              return;
+            }
+          }
+
           if reg.mp_enabled.load(Ordering::SeqCst) {
             let mp_play = reg.mp_play.lock().ok().and_then(|g| g.clone());
             if mp_play.as_ref() == Some(shortcut) {
@@ -1509,30 +1540,7 @@ pub fn run() {
             let mp_next = reg.mp_next.lock().ok().and_then(|g| g.clone());
             if mp_next.as_ref() == Some(shortcut) {
               let _ = app.emit("hotkey_massperm_next", ());
-              return;
             }
-          }
-
-          if !reg.enabled.load(Ordering::SeqCst) {
-            return;
-          }
-
-          let prev = reg.prev_map.lock().ok().and_then(|g| g.clone());
-          if prev.as_ref() == Some(shortcut) {
-            let _ = app.emit("hotkey_nav_play", serde_json::json!({ "delta": -1 }));
-            return;
-          }
-
-          let next = reg.next_map.lock().ok().and_then(|g| g.clone());
-          if next.as_ref() == Some(shortcut) {
-            let _ = app.emit("hotkey_nav_play", serde_json::json!({ "delta": 1 }));
-            return;
-          }
-
-          let replay = reg.replay_current.lock().ok().and_then(|g| g.clone());
-          if replay.as_ref() == Some(shortcut) {
-            let _ = app.emit("hotkey_replay_current", ());
-            return;
           }
         })
         .build(),
