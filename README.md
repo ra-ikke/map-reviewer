@@ -29,6 +29,7 @@ npx tauri dev
 
 The app reads Session API settings from three places (priority order):
 
+
 1. Runtime environment variables
 2. `.env` file (sibling `xero3.0/.env`)
 3. Build-time environment variables
