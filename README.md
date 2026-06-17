@@ -64,6 +64,33 @@ When finishing a review, if any maps have the **will be discussed** decision, th
   - `settings`
   - `items[]` (with `mapcode`, `commandsUsed`, `review`, `decision`, `status`, timestamps, etc.)
 
+## Global hotkeys
+
+Shortcuts are registered at the OS level and work in **any app** (e.g. the game window). They do **not** require Discord to be focused — the app types the load command into whichever window is active.
+
+Enable **Hotkeys** in the Queue panel (review session) or in Mass perm / Custom command. Use **Config hotkeys** to change bindings.
+
+### Review session
+
+| Action | Default key |
+|--------|-------------|
+| **Previous map** | `PageUp` |
+| **Next map** | `PageDown` |
+| **Play current map** | `Insert` |
+
+**Previous map** / **Next map** select the adjacent map in the queue and send the load command. **Play current map** re-sends the command for the selected map.
+
+### Mass perm / Custom command
+
+| Action | Default key |
+|--------|-------------|
+| **Play / Pause / Resume** | `Ctrl+P` |
+| **Play current map** | `Insert` |
+| **Previous map** | `PageUp` |
+| **Next map** | `PageDown` |
+
+Mass perm hotkeys are active only while the Mass perm or Custom command screen is open and **no review session** is running (review hotkeys take priority).
+
 ## macOS permissions (important)
 
 This app uses:

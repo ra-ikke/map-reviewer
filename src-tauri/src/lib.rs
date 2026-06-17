@@ -1033,6 +1033,53 @@ pub fn run() {
     Ok(())
   }
 
+  fn register_review_hotkeys_os(
+    app: &tauri::AppHandle,
+    reg: &HotkeyRegistry,
+    honor_mass_perm_conflicts: bool,
+  ) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+
+    if !reg.enabled.load(Ordering::SeqCst) {
+      return Ok(());
+    }
+
+    let prev = reg.prev_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
+    let next = reg.next_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
+    let replay = reg
+      .replay_current
+      .lock()
+      .map_err(|_| "hotkey lock poisoned")?
+      .clone();
+
+    let mp_conflict = |sc: &tauri_plugin_global_shortcut::Shortcut| -> bool {
+      if !honor_mass_perm_conflicts || !reg.mp_enabled.load(Ordering::SeqCst) {
+        return false;
+      }
+      let mp_play = reg.mp_play.lock().ok().and_then(|g| g.clone());
+      let mp_pause = reg.mp_pause.lock().ok().and_then(|g| g.clone());
+      let mp_next = reg.mp_next.lock().ok().and_then(|g| g.clone());
+      let mp_prev = reg.mp_prev.lock().ok().and_then(|g| g.clone());
+      [mp_play, mp_pause, mp_next, mp_prev]
+        .into_iter()
+        .flatten()
+        .any(|mp| mp == *sc)
+    };
+
+    for sc in [prev, next, replay].into_iter().flatten() {
+      if mp_conflict(&sc) {
+        continue;
+      }
+      unregister_shortcut(app, &Some(sc.clone()));
+      app
+        .global_shortcut()
+        .register(sc)
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+  }
+
   fn unregister_all_hotkeys(app: &tauri::AppHandle, reg: &HotkeyRegistry) -> Result<(), String> {
     let prev = reg.prev_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
     let next = reg.next_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
@@ -1136,22 +1183,7 @@ pub fn run() {
       Ok(())
     } else {
       unregister_massperm_hotkeys(app, reg)?;
-
-      // Re-registra hotkeys de sessão (apenas as que conflitam) se hotkeys estiverem habilitadas
-      if reg.enabled.load(Ordering::SeqCst) {
-        let next = reg.next_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
-        let replay = reg.replay_current.lock().map_err(|_| "hotkey lock poisoned")?.clone();
-        let prev = reg.prev_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
-        if let Some(sc) = next {
-          let _ = app.global_shortcut().register(sc);
-        }
-        if let Some(sc) = replay {
-          let _ = app.global_shortcut().register(sc);
-        }
-        if let Some(sc) = prev {
-          let _ = app.global_shortcut().register(sc);
-        }
-      }
+      register_review_hotkeys_os(app, reg, false)?;
 
       let _ = app.emit("massperm_hotkeys_status", serde_json::json!({ "enabled": false }));
       Ok(())
@@ -1163,32 +1195,12 @@ pub fn run() {
     reg: &HotkeyRegistry,
     enabled: bool,
   ) -> Result<(), String> {
-    use tauri_plugin_global_shortcut::GlobalShortcutExt;
-
     reg.enabled.store(enabled, Ordering::SeqCst);
 
-    let prev = reg.prev_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
-    let next = reg.next_map.lock().map_err(|_| "hotkey lock poisoned")?.clone();
-    let replay = reg
-      .replay_current
-      .lock()
-      .map_err(|_| "hotkey lock poisoned")?
-      .clone();
-
     if enabled {
-      if let Some(sc) = prev {
-        let _ = app.global_shortcut().register(sc);
-      }
-      if let Some(sc) = next {
-        let _ = app.global_shortcut().register(sc);
-      }
-      if let Some(sc) = replay {
-        let _ = app.global_shortcut().register(sc);
-      }
+      register_review_hotkeys_os(app, reg, true)?;
     } else {
-      unregister_shortcut(app, &prev);
-      unregister_shortcut(app, &next);
-      unregister_shortcut(app, &replay);
+      unregister_review_hotkeys(app, reg)?;
     }
 
     let _ = app.emit("hotkeys_status", serde_json::json!({ "enabled": enabled }));
@@ -1363,8 +1375,6 @@ pub fn run() {
     reg: tauri::State<'_, HotkeyRegistry>,
     args: RegisterHotkeysArgs,
   ) -> Result<(), String> {
-    use tauri_plugin_global_shortcut::GlobalShortcutExt;
-
     // troca hotkeys de review sem apagar config de mass perm
     unregister_review_hotkeys(&app, &reg)?;
 
@@ -1389,27 +1399,7 @@ pub fn run() {
       .lock()
       .map_err(|_| "hotkey lock poisoned")? = Some(replay_current.clone());
 
-    // registra as demais conforme flag enabled (default: true)
-    if reg.enabled.load(Ordering::SeqCst) {
-      let mp_play = reg.mp_play.lock().ok().and_then(|g| g.clone());
-      let mp_pause = reg.mp_pause.lock().ok().and_then(|g| g.clone());
-      let mp_next = reg.mp_next.lock().ok().and_then(|g| g.clone());
-      let mp_prev = reg.mp_prev.lock().ok().and_then(|g| g.clone());
-      let mp_list = [mp_play, mp_pause, mp_next, mp_prev];
-      let conflicts = |sc: &tauri_plugin_global_shortcut::Shortcut| {
-        mp_list.iter().flatten().any(|mp| mp == sc)
-      };
-
-      if !reg.mp_enabled.load(Ordering::SeqCst) || !conflicts(&prev_map) {
-        let _ = app.global_shortcut().register(prev_map.clone());
-      }
-      if !reg.mp_enabled.load(Ordering::SeqCst) || !conflicts(&next_map) {
-        let _ = app.global_shortcut().register(next_map.clone());
-      }
-      if !reg.mp_enabled.load(Ordering::SeqCst) || !conflicts(&replay_current) {
-        let _ = app.global_shortcut().register(replay_current.clone());
-      }
-    }
+    register_review_hotkeys_os(&app, &reg, true)?;
 
     let _ = app.emit(
       "hotkeys_registered",

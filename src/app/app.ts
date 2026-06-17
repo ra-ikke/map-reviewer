@@ -80,6 +80,13 @@ const DECISION_LABEL: Record<NonNullable<QueueItem['decision']>, string> = {
 
 const REVIEW_MAX_CHARS = 2000
 
+const HK = {
+  previousMap: 'Previous map',
+  nextMap: 'Next map',
+  playCurrentMap: 'Play current map',
+  playPauseResume: 'Play / Pause / Resume',
+} as const
+
 export function initApp(root: HTMLElement): void {
   let state: AppState = loadState()
   let unlistenClipboard: (() => void) | null = null
@@ -210,7 +217,7 @@ export function initApp(root: HTMLElement): void {
                   <option value="/npp">/npp</option>
                 </select>
               </label>
-              <label class="field checkbox" title="Global hotkeys: PageUp = prev+load | PageDown = next+load | Insert = replay (Use this checkbox to enable/disable)">
+              <label class="field checkbox" title="Global hotkeys work in any app (e.g. the game window)">
                 <input id="reviewHotkeys" type="checkbox" />
                 <span>Hotkeys</span>
               </label>
@@ -728,6 +735,9 @@ export function initApp(root: HTMLElement): void {
     if (!state.session) {
       openLauncher()
     }
+    void refreshGlobalHotkeys().catch(() => {
+      // best effort
+    })
   }
 
   function endCurrentSession(): void {
@@ -740,6 +750,9 @@ export function initApp(root: HTMLElement): void {
     syncNp()
     // destrava seletor de categoria (quando sessão era travada)
     els.apiCategory.disabled = false
+    void refreshGlobalHotkeys().catch(() => {
+      // best effort
+    })
   }
 
   async function maybeExportBeforeLeaving(): Promise<boolean> {
@@ -1335,7 +1348,7 @@ export function initApp(root: HTMLElement): void {
     cancel.addEventListener('click', () => close())
     confirm.addEventListener('click', () => {
       close()
-      void applyMassPermHotkeysConfig(false).catch(() => {
+      void refreshGlobalHotkeys().catch(() => {
         // best effort
       })
       resetMassPermData()
@@ -1461,16 +1474,16 @@ export function initApp(root: HTMLElement): void {
 
           <label class="field checkbox">
             <input id="mpHotkeys" type="checkbox" ${massPermHotkeysEnabled ? 'checked' : ''} />
-            <span>Enable hotkeys (toggle: ${mpKeys.toggle}, play current: ${mpKeys.playCurrent}, next: ${mpKeys.next}, back: ${mpKeys.prev})</span>
+            <span>Enable hotkeys (${HK.playPauseResume}: ${mpKeys.toggle}, ${HK.playCurrentMap}: ${mpKeys.playCurrent}, ${HK.nextMap}: ${mpKeys.next}, ${HK.previousMap}: ${mpKeys.prev})</span>
           </label>
 
           <div class="row">
             <button class="btn primary" id="mpToggle" title="Hotkey: ${mpKeys.toggle} (${hkLabel})">${
               massPermRunning ? 'Pause' : massPermIndex > 0 ? 'Resume' : 'Play'
             }</button>
-            <button class="btn" id="mpPlayCurrent" title="Hotkey: ${mpKeys.playCurrent} (${hkLabel})" ${!massPermInFlight ? '' : 'disabled'}>Play current map</button>
-            <button class="btn" id="mpPrev" title="Hotkey: ${mpKeys.prev} (${hkLabel})" ${canManualNav ? '' : 'disabled'}>Back</button>
-            <button class="btn" id="mpNext" title="Hotkey: ${mpKeys.next} (${hkLabel})" ${canManualNav ? '' : 'disabled'}>Next map</button>
+            <button class="btn" id="mpPlayCurrent" title="Hotkey: ${mpKeys.playCurrent} (${hkLabel})" ${!massPermInFlight ? '' : 'disabled'}>${HK.playCurrentMap}</button>
+            <button class="btn" id="mpPrev" title="Hotkey: ${mpKeys.prev} (${hkLabel})" ${canManualNav ? '' : 'disabled'}>${HK.previousMap}</button>
+            <button class="btn" id="mpNext" title="Hotkey: ${mpKeys.next} (${hkLabel})" ${canManualNav ? '' : 'disabled'}>${HK.nextMap}</button>
             <button class="btn danger" id="mpCancel" ${canCancelToHome ? '' : 'disabled'}>Cancel</button>
             <button class="btn" id="mpHotkeysConfig">Config hotkeys</button>
           </div>
@@ -1501,7 +1514,7 @@ export function initApp(root: HTMLElement): void {
     mpHotkeys.addEventListener('change', async () => {
       massPermHotkeysEnabled = mpHotkeys.checked
       try {
-        await syncHotkeyOwnership()
+        await refreshGlobalHotkeys()
         setMassPermStatus(`Hotkeys ${massPermHotkeysEnabled ? 'enabled' : 'disabled'}.`)
       } catch (e) {
         setMassPermStatus(`Failed to toggle hotkeys: ${String(e)}`)
@@ -1869,16 +1882,16 @@ export function initApp(root: HTMLElement): void {
 
           <label class="field checkbox">
             <input id="ccHotkeys" type="checkbox" ${massPermHotkeysEnabled ? 'checked' : ''} />
-            <span>Enable hotkeys (toggle: ${mpKeys.toggle}, play current: ${mpKeys.playCurrent}, next: ${mpKeys.next}, back: ${mpKeys.prev})</span>
+            <span>Enable hotkeys (${HK.playPauseResume}: ${mpKeys.toggle}, ${HK.playCurrentMap}: ${mpKeys.playCurrent}, ${HK.nextMap}: ${mpKeys.next}, ${HK.previousMap}: ${mpKeys.prev})</span>
           </label>
 
           <div class="row">
             <button class="btn primary" id="ccToggle" title="Hotkey: ${mpKeys.toggle} (${hkLabel})">${
               customCmdRunning ? 'Pause' : customCmdIndex > 0 ? 'Resume' : 'Play'
             }</button>
-            <button class="btn" id="ccPlayCurrent" title="Hotkey: ${mpKeys.playCurrent} (${hkLabel})" ${!customCmdInFlight ? '' : 'disabled'}>Play current map</button>
-            <button class="btn" id="ccPrev" title="Hotkey: ${mpKeys.prev} (${hkLabel})" ${canManualNav ? '' : 'disabled'}>Back</button>
-            <button class="btn" id="ccNext" title="Hotkey: ${mpKeys.next} (${hkLabel})" ${canManualNav ? '' : 'disabled'}>Next map</button>
+            <button class="btn" id="ccPlayCurrent" title="Hotkey: ${mpKeys.playCurrent} (${hkLabel})" ${!customCmdInFlight ? '' : 'disabled'}>${HK.playCurrentMap}</button>
+            <button class="btn" id="ccPrev" title="Hotkey: ${mpKeys.prev} (${hkLabel})" ${canManualNav ? '' : 'disabled'}>${HK.previousMap}</button>
+            <button class="btn" id="ccNext" title="Hotkey: ${mpKeys.next} (${hkLabel})" ${canManualNav ? '' : 'disabled'}>${HK.nextMap}</button>
             <button class="btn danger" id="ccCancel" ${canManualNav ? '' : 'disabled'}>Cancel</button>
             <button class="btn" id="ccHotkeysConfig">Config hotkeys</button>
           </div>
@@ -1919,7 +1932,7 @@ export function initApp(root: HTMLElement): void {
     ccHotkeys.addEventListener('change', async () => {
       massPermHotkeysEnabled = ccHotkeys.checked
       try {
-        await syncHotkeyOwnership()
+        await refreshGlobalHotkeys()
         setCustomCommandStatus(`Hotkeys ${massPermHotkeysEnabled ? 'enabled' : 'disabled'}.`)
       } catch (e) {
         setCustomCommandStatus(`Failed to toggle hotkeys: ${String(e)}`)
@@ -2194,7 +2207,7 @@ export function initApp(root: HTMLElement): void {
     els.massPerm.style.display = 'none'
     renderCustomCommand()
     setCustomCommandStatus('Load a list and enter a prefix.')
-    syncHotkeyOwnership().catch(() => {
+    refreshGlobalHotkeys().catch(() => {
       // best effort
     })
   }
@@ -2205,7 +2218,7 @@ export function initApp(root: HTMLElement): void {
     // mass perm pode rodar sem sessão; não força mostrar o shell
     renderMassPerm()
     setMassPermStatus('Load a list and choose a category.')
-    syncHotkeyOwnership().catch(() => {
+    refreshGlobalHotkeys().catch(() => {
       // best effort
     })
   }
@@ -2397,12 +2410,15 @@ export function initApp(root: HTMLElement): void {
     select(target.id)
   }
 
-  function syncHotkeyOwnership(): Promise<void> {
-    const massPermUiOpen = els.massPerm.style.display === 'grid' || els.customCommand.style.display === 'grid'
-    const useMassPermHotkeys = massPermUiOpen && massPermHotkeysEnabled && !state.session
-    return applyMassPermHotkeysConfig(useMassPermHotkeys).catch(() => {
-      // best effort
-    })
+  function isMassPermUiOpen(): boolean {
+    return els.massPerm.style.display === 'grid' || els.customCommand.style.display === 'grid'
+  }
+
+  async function refreshGlobalHotkeys(): Promise<void> {
+    await applyReviewHotkeysConfig()
+    await setReviewHotkeysEnabled(state.settings.reviewHotkeysEnabled)
+    const useMassPermHotkeys = isMassPermUiOpen() && massPermHotkeysEnabled && !state.session
+    await applyMassPermHotkeysConfig(useMassPermHotkeys)
   }
 
   function renderQueue(): void {
@@ -2612,9 +2628,6 @@ export function initApp(root: HTMLElement): void {
     document.body.classList.toggle('session-active', Boolean(state.session))
     setSessionHeaderMode(Boolean(state.session))
     if (state.session) updateFinishReviewButtonState()
-    syncHotkeyOwnership().catch(() => {
-      // best effort
-    })
     const sessionCategory = state.session?.category
     const catColor =
       (sessionCategory ? REVIEW_CATEGORIES.find((c) => c.code === sessionCategory)?.color : null) ?? '#ff6a7b'
@@ -2709,7 +2722,7 @@ function normalizeHotkeyDisplay(value: string): string {
 
   function getReviewHotkeysTitle(): string {
     const hk = state.settings.reviewHotkeys
-    return `Global hotkeys: ${hk.prevMap} = prev+load | ${hk.nextMap} = next+load | ${hk.replayCurrent} = replay`
+    return `Global hotkeys (any app): ${hk.prevMap} = ${HK.previousMap} | ${hk.nextMap} = ${HK.nextMap} | ${hk.replayCurrent} = ${HK.playCurrentMap}`
   }
 
   function openHotkeysModal(kind: 'review' | 'mass_perm'): void {
@@ -2721,15 +2734,15 @@ function normalizeHotkeyDisplay(value: string): string {
     const prevMassPermEnabled = massPermHotkeysEnabled
     const groupFields = isReview
       ? [
-          { id: 'prevMap', label: 'Prev + load', value: reviewCurrent.prevMap },
-          { id: 'nextMap', label: 'Next + load', value: reviewCurrent.nextMap },
-          { id: 'replayCurrent', label: 'Replay current', value: reviewCurrent.replayCurrent },
+          { id: 'prevMap', label: HK.previousMap, value: reviewCurrent.prevMap },
+          { id: 'nextMap', label: HK.nextMap, value: reviewCurrent.nextMap },
+          { id: 'replayCurrent', label: HK.playCurrentMap, value: reviewCurrent.replayCurrent },
         ]
       : [
-          { id: 'toggle', label: 'Play / Pause / Resume', value: massCurrent.toggle },
-          { id: 'playCurrent', label: 'Play current map', value: massCurrent.playCurrent },
-          { id: 'prev', label: 'Back', value: massCurrent.prev },
-          { id: 'next', label: 'Next', value: massCurrent.next },
+          { id: 'toggle', label: HK.playPauseResume, value: massCurrent.toggle },
+          { id: 'playCurrent', label: HK.playCurrentMap, value: massCurrent.playCurrent },
+          { id: 'prev', label: HK.previousMap, value: massCurrent.prev },
+          { id: 'next', label: HK.nextMap, value: massCurrent.next },
         ]
 
     const stateMap = new Map(groupFields.map((f) => [f.id, f.value]))
@@ -2827,28 +2840,35 @@ function normalizeHotkeyDisplay(value: string): string {
       updateLabel(f.id)
     }
 
-    const close = () => {
+    const closeModal = async (opts?: { saved?: boolean }) => {
       els.hotkeysModal.style.display = 'none'
       els.hotkeysModal.innerHTML = ''
       document.removeEventListener('keydown', onKeydown, true)
-      if (prevReviewEnabled !== state.settings.reviewHotkeysEnabled) {
-        updateSettings({ reviewHotkeysEnabled: prevReviewEnabled })
-        void setReviewHotkeysEnabled(prevReviewEnabled).catch(() => {
-          // best effort
-        })
-        if (els.reviewHotkeys) els.reviewHotkeys.checked = prevReviewEnabled
+
+      if (opts?.saved) {
+        if (prevReviewEnabled) {
+          updateSettings({ reviewHotkeysEnabled: true })
+          if (els.reviewHotkeys) els.reviewHotkeys.checked = true
+        }
+        if (prevMassPermEnabled) {
+          massPermHotkeysEnabled = prevMassPermEnabled
+        }
+      } else {
+        if (prevReviewEnabled !== state.settings.reviewHotkeysEnabled) {
+          updateSettings({ reviewHotkeysEnabled: prevReviewEnabled })
+          if (els.reviewHotkeys) els.reviewHotkeys.checked = prevReviewEnabled
+        }
+        if (prevMassPermEnabled !== massPermHotkeysEnabled) {
+          massPermHotkeysEnabled = prevMassPermEnabled
+          renderMassPerm()
+          renderCustomCommand()
+        }
       }
-      if (prevMassPermEnabled !== massPermHotkeysEnabled) {
-        massPermHotkeysEnabled = prevMassPermEnabled
-        void applyMassPermHotkeysConfig(prevMassPermEnabled).catch(() => {
-          // best effort
-        })
-        renderMassPerm()
-        renderCustomCommand()
-      }
+
+      await refreshGlobalHotkeys()
     }
 
-    cancelBtn.addEventListener('click', () => close())
+    cancelBtn.addEventListener('click', () => void closeModal())
     saveBtn.addEventListener('click', async () => {
       const next: Record<string, string> = {}
       for (const f of groupFields) {
@@ -2869,7 +2889,6 @@ function normalizeHotkeyDisplay(value: string): string {
             nextMap: next.nextMap,
             replayCurrent: next.replayCurrent,
           }
-          await registerHotkeys(updated)
           updateSettings({ reviewHotkeys: updated })
           const reviewLabel = els.reviewHotkeys.closest('label')
           if (reviewLabel) reviewLabel.title = getReviewHotkeysTitle()
@@ -2880,7 +2899,6 @@ function normalizeHotkeyDisplay(value: string): string {
             next: next.next,
             prev: next.prev,
           }
-          await setMassPermHotkeysConfig({ enabled: massPermHotkeysEnabled, hotkeys: updated })
           updateSettings({ massPermHotkeys: updated })
           if (els.massPerm.style.display === 'grid') {
             renderMassPerm()
@@ -2889,7 +2907,7 @@ function normalizeHotkeyDisplay(value: string): string {
             renderCustomCommand()
           }
         }
-        close()
+        await closeModal({ saved: true })
       } catch (e) {
         statusEl.textContent = formatHotkeyError(String(e))
       }
@@ -2982,7 +3000,7 @@ function normalizeHotkeyDisplay(value: string): string {
   els.reviewHotkeys.addEventListener('change', () => {
     const enabled = els.reviewHotkeys.checked
     updateSettings({ reviewHotkeysEnabled: enabled })
-    void setReviewHotkeysEnabled(enabled).catch(() => {
+    void refreshGlobalHotkeys().catch(() => {
       // best effort
     })
   })
@@ -3096,6 +3114,9 @@ function normalizeHotkeyDisplay(value: string): string {
             setShellVisible(true)
             els.apiCategory.value = category as any
             els.apiCategory.disabled = true
+            void refreshGlobalHotkeys().catch(() => {
+              // best effort
+            })
             return
           }
 
@@ -3136,6 +3157,9 @@ function normalizeHotkeyDisplay(value: string): string {
             persist()
 
             addItems(items, `session json: ${basename(path)}`)
+            void refreshGlobalHotkeys().catch(() => {
+              // best effort
+            })
             return
           }
         } catch {
@@ -3207,6 +3231,9 @@ function normalizeHotkeyDisplay(value: string): string {
         })
 
       addItems(items, `api: ${data.category}`)
+      void refreshGlobalHotkeys().catch(() => {
+        // best effort
+      })
     } catch (e) {
       setStatus(`Failed to fetch session (${categoryType}): ${String(e)}`)
     }
@@ -3489,6 +3516,9 @@ function normalizeHotkeyDisplay(value: string): string {
         persist()
         render()
         syncNp()
+        void refreshGlobalHotkeys().catch(() => {
+          // best effort
+        })
         // para "Paste list", não mostra o shell vazio antes de importar
         setShellVisible(selectedMethod !== 'textarea')
 
@@ -3524,7 +3554,7 @@ function normalizeHotkeyDisplay(value: string): string {
     // Se não há sessão ativa, não mostrar a página vazia ao fundo
     setShellVisible(Boolean(state.session))
     renderWizard(0, 'P3', 'session_api', 'session')
-    syncHotkeyOwnership().catch(() => {
+    refreshGlobalHotkeys().catch(() => {
       // best effort
     })
   }
@@ -3631,20 +3661,16 @@ function normalizeHotkeyDisplay(value: string): string {
   void hydrateAppVersion()
 
   // hotkeys globais (best effort)
-  void applyReviewHotkeysConfig().catch(() => {
-    // best effort
-  })
-  // aplica estado salvo das hotkeys de review (best effort)
-  void setReviewHotkeysEnabled(state.settings.reviewHotkeysEnabled).catch(() => {
+  void refreshGlobalHotkeys().catch(() => {
     // best effort
   })
 
   // eventos de hotkeys globais (best effort)
-  void onHotkeyReplayCurrent(() => replayCurrentMap('hotkey: replay current')).catch(() => {
+  void onHotkeyReplayCurrent(() => replayCurrentMap(`hotkey: ${HK.playCurrentMap}`)).catch(() => {
     // best effort
   })
   void onHotkeyNavPlay((delta) => {
-    navigateAndPlay(delta, delta > 0 ? 'hotkey: next map' : 'hotkey: previous map')
+    navigateAndPlay(delta, delta > 0 ? `hotkey: ${HK.nextMap}` : `hotkey: ${HK.previousMap}`)
   }).catch(() => {
     // best effort
   })
@@ -3656,7 +3682,7 @@ function normalizeHotkeyDisplay(value: string): string {
 
   // hotkeys globais do mass perm (best effort)
   void onHotkeyMassPermToggle(() => {
-    if (!massPermHotkeysEnabled || state.session) return
+    if (!massPermHotkeysEnabled || !isMassPermUiOpen()) return
     if (els.customCommand.style.display === 'grid') {
       const btn = els.customCommand.querySelector<HTMLButtonElement>('#ccToggle')
       btn?.click()
@@ -3670,7 +3696,7 @@ function normalizeHotkeyDisplay(value: string): string {
     // best effort
   })
   void onHotkeyMassPermPlayCurrent(() => {
-    if (!massPermHotkeysEnabled || state.session) return
+    if (!massPermHotkeysEnabled || !isMassPermUiOpen()) return
     if (els.customCommand.style.display === 'grid') {
       const btn = els.customCommand.querySelector<HTMLButtonElement>('#ccPlayCurrent')
       btn?.click()
@@ -3684,7 +3710,7 @@ function normalizeHotkeyDisplay(value: string): string {
     // best effort
   })
   void onHotkeyMassPermNext(() => {
-    if (!massPermHotkeysEnabled || state.session) return
+    if (!massPermHotkeysEnabled || !isMassPermUiOpen()) return
     if (els.customCommand.style.display === 'grid') {
       const btn = els.customCommand.querySelector<HTMLButtonElement>('#ccNext')
       btn?.click()
@@ -3698,7 +3724,7 @@ function normalizeHotkeyDisplay(value: string): string {
     // best effort
   })
   void onHotkeyMassPermPrev(() => {
-    if (!massPermHotkeysEnabled || state.session) return
+    if (!massPermHotkeysEnabled || !isMassPermUiOpen()) return
     if (els.customCommand.style.display === 'grid') {
       const btn = els.customCommand.querySelector<HTMLButtonElement>('#ccPrev')
       btn?.click()
