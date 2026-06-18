@@ -3,14 +3,13 @@ import { APP_VERSION, type AppState, type QueueItem } from './model'
 import { RELEASE_NOTES } from './release-notes'
 import { loadState, saveState } from './storage'
 import { buildExportPayloadV1 } from './export'
-import { CATEGORIES, REVIEW_CATEGORIES, parseCategoryNumber, type ReviewedCategoryCode } from './categories'
+import { CATEGORIES, REVIEW_CATEGORIES, findCategory, parseCategoryNumber, resolveItemMapCategoryCode, type ReviewedCategoryCode } from './categories'
 import {
   exportJsonToPath,
   validateAuthToken,
   fetchMapInfo,
   fetchLiveMapInfo,
   fetchLiveMapImageUrl,
-  buildLiveMapPageUrl,
   type LiveMapInfoResponse,
   fetchSessionFromApi,
   submitSessionReview,
@@ -487,6 +486,25 @@ export function initApp(root: HTMLElement): void {
     return state.items.filter((it) => String(it.mapcode).replace(/^@+/, '') === mc)
   }
 
+  function renderCategoryBadgeHtml(code: string | null): string {
+    if (!code) {
+      return '<span class="categoryBadge categoryBadgeEmpty">—</span>'
+    }
+    const meta = findCategory(code)
+    if (!meta) {
+      return `<span class="categoryBadge"><span class="categoryBadgeLabel">${escapeHtml(code)}</span></span>`
+    }
+    const icon = meta.picture
+      ? `<img class="categoryBadgeIcon" src="${escapeHtml(meta.picture)}" alt="" />`
+      : ''
+    const color = meta.color ? ` style="--cat-color: ${meta.color}"` : ''
+    return `<span class="categoryBadge"${color}>${icon}<span class="categoryBadgeLabel">${escapeHtml(meta.description)}</span></span>`
+  }
+
+  function getSelectedMapCategoryCode(sel: QueueItem): string | null {
+    return resolveItemMapCategoryCode(sel)
+  }
+
   function applyLiveMapInfoToItems(mapId: number, live: LiveMapInfoResponse): void {
     const matches = getItemsByMapId(mapId)
     if (!matches.length) return
@@ -522,9 +540,15 @@ export function initApp(root: HTMLElement): void {
     }
   }
 
-  function openMapPreviewModal(args: { mapcode: string; pageUrl: string; imageUrl: string | null }): void {
+  function openMapPreviewModal(args: {
+    mapcode: string
+    imageUrl: string | null
+    author?: string | null
+    categoryCode?: string | null
+  }): void {
     els.mapPreviewModal.style.display = 'grid'
     const mapLabel = `@${String(args.mapcode).replace(/^@+/, '')}`
+    const categoryCode = args.categoryCode ?? null
     const imgBlock = args.imageUrl
       ? `<img class="mapPreviewImage" src="${escapeHtml(args.imageUrl)}" alt="Map preview ${escapeHtml(mapLabel)}" />`
       : `<div class="wizardHint">No preview image available.</div>`
@@ -538,15 +562,25 @@ export function initApp(root: HTMLElement): void {
           </div>
         </div>
         <div class="wizardBody mapPreviewBody">
+          <div class="mapPreviewMeta">
+            <div class="kv">
+              <div class="k">Author</div>
+              <div class="v">${escapeHtml(args.author?.trim() || '—')}</div>
+            </div>
+            <div class="kv">
+              <div class="k">Current Category</div>
+              <div class="v">${renderCategoryBadgeHtml(categoryCode)}</div>
+            </div>
+          </div>
           ${imgBlock}
           <div class="kv">
-            <div class="k">URL</div>
-            <div class="v mono mapPreviewUrl">${escapeHtml(args.pageUrl)}</div>
+            <div class="k">Image URL</div>
+            <div class="v mono mapPreviewUrl">${args.imageUrl ? escapeHtml(args.imageUrl) : '—'}</div>
           </div>
         </div>
         <div class="wizardFooter">
           <div class="wizardFooterLeft">
-            <button class="btn" id="mapPreviewCopyUrl">Copy URL</button>
+            <button class="btn" id="mapPreviewCopyUrl" ${args.imageUrl ? '' : 'disabled'}>Copy image URL</button>
           </div>
           <div class="wizardFooterRight">
             <button class="btn primary" id="mapPreviewClose">Close</button>
@@ -562,13 +596,14 @@ export function initApp(root: HTMLElement): void {
 
     els.mapPreviewModal.querySelector<HTMLButtonElement>('#mapPreviewClose')?.addEventListener('click', () => close())
     els.mapPreviewModal.querySelector<HTMLButtonElement>('#mapPreviewCopyUrl')?.addEventListener('click', async () => {
+      if (!args.imageUrl) return
       try {
         if (navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(args.pageUrl)
+          await navigator.clipboard.writeText(args.imageUrl)
         } else {
-          await writeClipboardText(args.pageUrl)
+          await writeClipboardText(args.imageUrl)
         }
-        showToast('Map URL copied.')
+        showToast('Image URL copied.')
       } catch (e) {
         showToast(`Failed to copy URL: ${String(e)}`, 'error')
       }
@@ -577,27 +612,49 @@ export function initApp(root: HTMLElement): void {
 
   async function openMapPreviewForMapcode(mapcode: string): Promise<void> {
     const id = String(mapcode).replace(/^@+/, '')
-    const pageUrl = buildLiveMapPageUrl(id)
-    let imageUrl = getItemsByMapId(Number.parseInt(id, 10)).find((it) => it.imageUrl)?.imageUrl ?? null
+    const mapId = mapIdFromMapcode(id)
+    const related = mapId ? getItemsByMapId(mapId) : []
+    const sel = getSelected()
+    let author = sel?.author ?? related.find((it) => it.author)?.author ?? null
+    let categoryCode = sel ? getSelectedMapCategoryCode(sel) : related.length ? resolveItemMapCategoryCode(related[0]!) : null
 
-    if (!imageUrl) {
+    if (!author || !categoryCode) {
       try {
-        imageUrl = await fetchLiveMapImageUrl(id)
+        const live = await fetchLiveMapInfo(id)
+        if (mapId) applyLiveMapInfoToItems(mapId, live)
+        persist()
+        updateDetailsValues()
+        author = live.content?.author ?? author
+        categoryCode =
+          resolveItemMapCategoryCode({
+            mapCategory: live.content?.category,
+            p: categoryCode ? parseCategoryNumber(categoryCode) : null,
+          }) ?? categoryCode
       } catch {
-        try {
-          const live = await fetchLiveMapInfo(id)
-          imageUrl = live.imageUrl ?? null
-          const mapId = mapIdFromMapcode(id)
-          if (mapId) applyLiveMapInfoToItems(mapId, live)
-          persist()
-          updateDetailsValues()
-        } catch {
-          imageUrl = null
-        }
+        // best effort
       }
     }
 
-    openMapPreviewModal({ mapcode: id, pageUrl, imageUrl })
+    let imageUrl: string | null = null
+    try {
+      imageUrl = await fetchLiveMapImageUrl(id)
+      if (mapId && imageUrl) {
+        for (const it of related) {
+          it.imageUrl = imageUrl
+          it.updatedAt = nowIso()
+        }
+        persist()
+      }
+    } catch {
+      imageUrl = related.find((it) => it.imageUrl)?.imageUrl ?? null
+    }
+
+    openMapPreviewModal({
+      mapcode: id,
+      imageUrl,
+      author,
+      categoryCode,
+    })
   }
 
   function updateFinishReviewButtonState(): void {
@@ -2532,6 +2589,7 @@ export function initApp(root: HTMLElement): void {
               it.author = entry.author ?? null
               it.xml = entry.xml ?? null
               it.p = typeof entry.p === 'number' ? entry.p : null
+              if (it.p != null && !it.mapCategory) it.mapCategory = `P${it.p}`
               it.updatedAt = nowIso()
             }
           }
@@ -2723,30 +2781,33 @@ export function initApp(root: HTMLElement): void {
     ].join('')
 
     els.details.innerHTML = `
-      <div class="row" style="align-items: flex-start; gap: 12px; flex-wrap: wrap;">
-        <div class="kv" style="flex: 1; min-width: 220px;">
-          <div class="k">Mapcode</div>
-          <div class="v mono">@<span id="d_mapcode"></span></div>
-        </div>
+      <div class="kv">
+        <div class="k">Mapcode</div>
+        <div class="v mono">@<span id="d_mapcode"></span></div>
+      </div>
 
-        <div class="kv" style="flex: 1; min-width: 220px;">
-          <div class="k">Submitter</div>
-          <div class="v"><span id="d_submitter">—</span></div>
-        </div>
+      <div class="kv">
+        <div class="k">Current Category</div>
+        <div class="v" id="d_currentCategory"></div>
+      </div>
+
+      <div class="kv">
+        <div class="k">Submitter</div>
+        <div class="v"><span id="d_submitter">—</span></div>
       </div>
 
       <div class="kv">
         <div class="k">Author</div>
-        <div class="row" style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-          <div class="v"><span id="d_author">—</span></div>
-          <div class="row" style="gap: 8px; flex-wrap: wrap;">
-            <button class="btn" id="refreshMapData">Refresh map data</button>
-            <button class="btn" id="mapPreviewBtn">Map preview</button>
-            <button class="btn" id="copyXml">Copy XML</button>
-          </div>
+        <div class="v"><span id="d_author">—</span></div>
+      </div>
+
+      <div class="kv">
+        <div class="k">Actions</div>
+        <div class="row detailsActions">
+          <button class="btn" id="refreshMapData">Refresh map data</button>
+          <button class="btn" id="mapPreviewBtn">Map preview</button>
+          <button class="btn" id="copyXml">Copy XML</button>
         </div>
-        <div class="status" id="d_mapCategory"></div>
-        <div class="status" id="d_xmlStatus"></div>
       </div>
 
       <div class="kv">
@@ -2863,18 +2924,16 @@ export function initApp(root: HTMLElement): void {
     const reviewCounter = els.details.querySelector<HTMLDivElement>('#reviewCounter')
     const decisionSelect = els.details.querySelector<HTMLSelectElement>('#decisionSelect')
     const author = els.details.querySelector<HTMLSpanElement>('#d_author')
-    const mapCategory = els.details.querySelector<HTMLDivElement>('#d_mapCategory')
+    const currentCategory = els.details.querySelector<HTMLDivElement>('#d_currentCategory')
     const copyXml = els.details.querySelector<HTMLButtonElement>('#copyXml')
-    const xmlStatus = els.details.querySelector<HTMLDivElement>('#d_xmlStatus')
 
     if (mapcode) mapcode.textContent = String(sel.mapcode).replace(/^@+/, '')
     if (submitter) submitter.textContent = sel.submitter ?? '—'
     if (author) author.textContent = sel.author ?? '—'
-    if (mapCategory) {
-      mapCategory.textContent = sel.mapCategory ? `Map category: ${sel.mapCategory}` : ''
+    if (currentCategory) {
+      currentCategory.innerHTML = renderCategoryBadgeHtml(getSelectedMapCategoryCode(sel))
     }
     if (copyXml) copyXml.disabled = !sel.xml
-    if (xmlStatus) xmlStatus.textContent = sel.xml ? `XML ready (p=${sel.p ?? '—'})` : 'Fetching XML…'
     if (decisionSelect && decisionSelect.value !== (sel.decision ?? '')) {
       decisionSelect.value = sel.decision ?? ''
     }

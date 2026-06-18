@@ -201,6 +201,14 @@ export const CATEGORIES: CategoryMeta[] = [
     reviewed: true,
   },
   {
+    code: 'P27',
+    description: 'Retro Racing (P27)',
+    picture: 'https://i.imgur.com/vavqwda.png',
+    color: '#C32C12',
+    decisions: ['ignored'],
+    reviewed: false,
+  },
+  {
     code: 'P32',
     description: 'Double Shaman Test (P32)',
     picture: 'https://i.imgur.com/nd09QvE.png',
@@ -213,6 +221,22 @@ export const CATEGORIES: CategoryMeta[] = [
     description: 'Dual Shaman Survivor Test (P34)',
     picture: 'https://i.imgur.com/7Pc6fHb.png',
     color: '#C3C3C3',
+    decisions: ['ignored'],
+    reviewed: false,
+  },
+  {
+    code: 'P37',
+    description: 'Nitro Racing (P37)',
+    picture: 'https://i.imgur.com/zCSaGV3.png',
+    color: '#C32C12',
+    decisions: ['ignored'],
+    reviewed: false,
+  },
+  {
+    code: 'P38',
+    description: 'Racing Archive (P38)',
+    picture: 'https://i.imgur.com/HibNSyQ.png',
+    color: '#C32C12',
     decisions: ['ignored'],
     reviewed: false,
   },
@@ -289,5 +313,18 @@ export function parseCategoryNumber(code: string): number | null {
   const normalized = raw.startsWith('P') ? raw.slice(1) : raw
   const n = Number.parseInt(normalized, 10)
   return Number.isFinite(n) ? n : null
+}
+
+export function resolveItemMapCategoryCode(item: {
+  mapCategory?: string | null
+  p?: number | null
+}): string | null {
+  const fromField = String(item.mapCategory ?? '').trim()
+  if (fromField) {
+    const found = findCategory(fromField)
+    return found?.code ?? (fromField.toUpperCase().startsWith('P') ? fromField.toUpperCase() : `P${fromField}`)
+  }
+  if (item.p != null && Number.isFinite(item.p)) return `P${item.p}`
+  return null
 }
 

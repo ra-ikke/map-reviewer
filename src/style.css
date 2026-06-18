@@ -702,6 +702,47 @@ body.session-active #inputPanel {
   font-size: 12px;
 }
 
+.mapPreviewMeta {
+  display: grid;
+  gap: 10px;
+}
+
+.categoryBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgb(var(--panel2-rgb) / 0.55);
+  max-width: 100%;
+}
+
+.categoryBadgeEmpty {
+  padding: 4px 10px;
+  color: var(--muted);
+}
+
+.categoryBadgeIcon {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.categoryBadgeLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.detailsActions {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 @media (max-width: 1100px) {
   .main {
     grid-template-columns: 1fr;
