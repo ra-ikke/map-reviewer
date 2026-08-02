@@ -79,7 +79,21 @@ export function loadState(): AppState {
 }
 
 export function saveState(state: AppState): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  } catch (e) {
+    // Large review images can exceed localStorage quota — retry without attachments.
+    try {
+      const slim: AppState = {
+        ...state,
+        items: state.items.map((it) => ({ ...it, reviewImage: null })),
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(slim))
+      console.warn('localStorage quota exceeded; persisted session without review image attachments.', e)
+    } catch {
+      console.warn('Failed to persist app state.', e)
+    }
+  }
 }
 
 export function freshState(): AppState {

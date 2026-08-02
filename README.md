@@ -162,6 +162,37 @@ No auth is required for the live map API. Endpoints used by the app:
 
 In the review panel: **Refresh map data** (live API) and **Map preview** (URL + image).
 
+## Review comment editor (Discord markdown)
+
+The Comment field includes a formatting toolbar compatible with Discord message markdown:
+
+- **Bold** `**text**`, *Italic* `*text*`, <u>Underline</u> `__text__`, ~~Strikethrough~~ `~~text~~`
+- Spoiler `||text||`, inline code, and code block
+- Emoji picker with server custom emojis (`<:name:id>`) and common Unicode emojis
+
+Select text and click a format button to wrap it, or click with an empty selection to insert markers with the caret in the middle.
+
+## Review image attachment
+
+Each map can optionally include **one** image attachment (PNG / JPEG / WebP / GIF, max 8MB). In the review panel use **Attachment → Attach image**.
+
+When finishing a review, the Session API payload includes a structured `image` object per map:
+
+```json
+{
+  "mapcode": "@7654321",
+  "decision": "will_be_discussed",
+  "review": "Needs discussion.",
+  "image": {
+    "base64": "...",
+    "filename": "7654321.png",
+    "mimeType": "image/png"
+  }
+}
+```
+
+The API also accepts `imageBase64` (raw or data-URL). Maps with an image are posted as a single Discord message (text + file); oversized images are skipped server-side.
+
 Releases require a **classic PAT** saved as repository secret `RELEASE_TOKEN` (scope `repo`). The workflow no longer relies on `GITHUB_TOKEN` for publishing.
 
 ### Configure `RELEASE_TOKEN`

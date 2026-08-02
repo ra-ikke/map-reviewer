@@ -6,6 +6,14 @@ export type InputMethod = 'session_api' | 'session_json' | 'file_text' | 'clipbo
 
 export type ItemStatus = 'pending' | 'reviewed'
 
+/** Optional image attached to a map review (posted to Discord with the map). */
+export interface ReviewImageAttachment {
+  /** Raw base64 (no data: prefix). */
+  base64: string
+  filename: string
+  mimeType: string
+}
+
 export interface QueueItem {
   id: string
   mapcode: string
@@ -13,12 +21,15 @@ export interface QueueItem {
   xml?: string | null
   p?: number | null
   mapCategory?: string | null
+  /** Preview URL from live map API (not a review attachment). */
   imageUrl?: string | null
   submitter?: string | null
   importedIgnored?: boolean | null
   importedReason?: string | null
   commandsUsed: CommandMode[]
   review: string
+  /** Optional review attachment (max 1 per map). */
+  reviewImage?: ReviewImageAttachment | null
   decision: Decision | null
   status: ItemStatus
   createdAt: string
@@ -85,5 +96,5 @@ export const DEFAULT_SETTINGS: Settings = {
   authUserId: null,
 }
 
-export const APP_VERSION = '1.0.15'
+export const APP_VERSION = '1.0.16'
 

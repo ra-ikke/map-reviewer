@@ -1,4 +1,4 @@
-import type { AppState, QueueItem } from './model'
+import type { AppState, QueueItem, ReviewImageAttachment } from './model'
 
 export const EXPORT_SCHEMA_VERSION = 1 as const
 
@@ -18,6 +18,12 @@ export interface ExportSessionV1 {
   limitPerUser?: number | null
 }
 
+export interface ExportReviewImageV1 {
+  base64: string
+  filename: string
+  mimeType: string
+}
+
 export interface ExportQueueItemV1 {
   id: string
   mapcode: string
@@ -32,6 +38,8 @@ export interface ExportQueueItemV1 {
   status: QueueItem['status']
   createdAt: string
   updatedAt: string
+  /** Structured attachment preferred by Session API / Discord post. */
+  image?: ExportReviewImageV1 | null
 }
 
 export interface ExportPayloadV1 {
@@ -43,12 +51,22 @@ export interface ExportPayloadV1 {
   items: ExportQueueItemV1[]
 }
 
+function toExportImage(image: ReviewImageAttachment | null | undefined): ExportReviewImageV1 | null {
+  if (!image?.base64?.trim()) return null
+  return {
+    base64: image.base64.replace(/\s+/g, ''),
+    filename: image.filename?.trim() || 'map.png',
+    mimeType: image.mimeType?.trim() || 'image/png',
+  }
+}
+
 export function buildExportPayloadV1(
   state: AppState,
   exportedAt = new Date().toISOString(),
-  opts?: { includeXml?: boolean },
+  opts?: { includeXml?: boolean; includeReviewImages?: boolean },
 ): ExportPayloadV1 {
   const includeXml = Boolean(opts?.includeXml)
+  const includeReviewImages = opts?.includeReviewImages !== false
   return {
     schemaVersion: EXPORT_SCHEMA_VERSION,
     appVersion: state.appVersion,
@@ -86,8 +104,11 @@ export function buildExportPayloadV1(
       }
 
       if (includeXml) base.xml = it.xml ?? null
+      if (includeReviewImages) {
+        const image = toExportImage(it.reviewImage)
+        if (image) base.image = image
+      }
       return base
     }),
   }
 }
-

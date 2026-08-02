@@ -1,6 +1,9 @@
 import { normalizeMapcode, parseMapcodesFromText, uniqPreserveOrder } from './mapcodes'
 import { APP_VERSION, type AppState, type QueueItem } from './model'
 import { RELEASE_NOTES } from './release-notes'
+import { applyToTextarea, insertAtSelection, wrapDiscordMarkdown, type DiscordWrapKind } from './discord-format'
+import { renderEmojiPickerHtml } from './emoji-picker'
+import { parseReviewImageFromItemFields, readFileAsReviewImage, reviewImageDataUrl } from './review-image'
 import { loadState, saveState } from './storage'
 import { buildExportPayloadV1 } from './export'
 import { CATEGORIES, REVIEW_CATEGORIES, findCategory, parseCategoryNumber, resolveItemMapCategoryCode, type ReviewedCategoryCode } from './categories'
@@ -70,6 +73,7 @@ function createItem(mapcode: string): QueueItem {
     importedReason: null,
     commandsUsed: [],
     review: '',
+    reviewImage: null,
     decision: null,
     status: 'pending',
     createdAt: ts,
@@ -1125,6 +1129,10 @@ export function initApp(root: HTMLElement): void {
     const canFinish = total > 0 && remaining === 0
     const missingMapcodes = getUnreviewedMapcodes()
     const isPublic = isPublicUser()
+    const isVotecrew = isVotecrewUser()
+    // Votecrew reviews require approval before publishing, so they must not
+    // create forum discussions automatically when finishing.
+    const canCreateDiscussions = !isVotecrew
     const discussItems = getWillBeDiscussedItems()
     const hasAuthToken = Boolean((state.settings.authToken ?? '').trim())
 
@@ -1176,7 +1184,20 @@ export function initApp(root: HTMLElement): void {
               : ''
           }
           ${
-            discussItems.length
+            discussItems.length && !canCreateDiscussions
+              ? `
+                <div class="kv">
+                  <div class="k">Forum discussions</div>
+                  <div class="wizardHint">
+                    Votecrew reviews require approval before publishing, so forum discussions
+                    won't be created automatically. They will be opened after your review is approved.
+                  </div>
+                </div>
+              `
+              : ''
+          }
+          ${
+            discussItems.length && canCreateDiscussions
               ? `
                 <div class="kv">
                   <div class="k">Create forum discussions</div>
@@ -1278,9 +1299,13 @@ export function initApp(root: HTMLElement): void {
         const selectedDiscussIds = new Set(
           frDiscussMapChecks.filter((cb) => cb.checked).map((cb) => cb.dataset.id ?? '').filter(Boolean),
         )
-        const mapsToDiscuss = discussItems
-          .filter((it) => selectedDiscussIds.has(it.id))
-          .map((it) => formatMapCodeForApi(it.mapcode))
+        // Votecrew reviews need approval before publishing, so we never create
+        // discussions automatically for them (defense in depth beyond hiding the UI).
+        const mapsToDiscuss = canCreateDiscussions
+          ? discussItems
+              .filter((it) => selectedDiscussIds.has(it.id))
+              .map((it) => formatMapCodeForApi(it.mapcode))
+          : []
 
         const path = await openExportSaveDialog(getDefaultSessionExportFileName())
         if (!path) return // usuário cancelou o save dialog -> continua no modal
@@ -2811,6 +2836,25 @@ export function initApp(root: HTMLElement): void {
       </div>
 
       <div class="kv">
+        <div class="k">Attachment</div>
+        <div class="v reviewAttachment">
+          <div class="row detailsActions">
+            <button class="btn" id="attachReviewImage">Attach image</button>
+            <button class="btn" id="removeReviewImage" ${sel.reviewImage ? '' : 'disabled'}>Remove</button>
+          </div>
+          <input id="reviewImageFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+          <div class="reviewAttachmentPreview" id="d_reviewImagePreview">
+            ${
+              sel.reviewImage
+                ? `<img src="${reviewImageDataUrl(sel.reviewImage)}" alt="Review attachment" />
+                   <div class="wizardHint mono">${escapeHtml(sel.reviewImage.filename)} · max 1 image</div>`
+                : `<div class="wizardHint">Optional — max 1 image per map (PNG/JPEG/WebP/GIF, up to 8MB). Posted with the review on Discord.</div>`
+            }
+          </div>
+        </div>
+      </div>
+
+      <div class="kv">
         <div class="k">Decision</div>
         <select id="decisionSelect">
           ${decisionOptionsHtml}
@@ -2819,7 +2863,22 @@ export function initApp(root: HTMLElement): void {
 
       <div class="kv">
         <div class="k">Comment</div>
-        <textarea id="reviewInput" class="textarea" rows="10" maxlength="${REVIEW_MAX_CHARS}" placeholder="Write your review here..."></textarea>
+        <div class="reviewEditor">
+          <div class="reviewToolbar" role="toolbar" aria-label="Discord formatting">
+            <button type="button" class="reviewFmtBtn" data-fmt="bold" title="Bold (**text**)"><b>B</b></button>
+            <button type="button" class="reviewFmtBtn" data-fmt="italic" title="Italic (*text*)"><i>I</i></button>
+            <button type="button" class="reviewFmtBtn" data-fmt="underline" title="Underline (__text__)"><u>U</u></button>
+            <button type="button" class="reviewFmtBtn" data-fmt="strikethrough" title="Strikethrough (~~text~~)"><s>S</s></button>
+            <span class="reviewToolbarSep" aria-hidden="true"></span>
+            <button type="button" class="reviewFmtBtn" data-fmt="spoiler" title="Spoiler (||text||)">||</button>
+            <button type="button" class="reviewFmtBtn" data-fmt="code" title="Inline code (\`text\`)"><span class="mono">\`\`</span></button>
+            <button type="button" class="reviewFmtBtn" data-fmt="codeblock" title="Code block">\`\`\`</button>
+            <span class="reviewToolbarSep" aria-hidden="true"></span>
+            <button type="button" class="reviewFmtBtn" id="reviewEmojiToggle" title="Emoji picker">😀</button>
+          </div>
+          ${renderEmojiPickerHtml()}
+          <textarea id="reviewInput" class="textarea reviewTextarea" rows="10" maxlength="${REVIEW_MAX_CHARS}" placeholder="Write your review here (Discord markdown supported)..."></textarea>
+        </div>
         <div class="status" id="reviewCounter"></div>
       </div>
     `
@@ -2831,10 +2890,84 @@ export function initApp(root: HTMLElement): void {
     const copyXml = els.details.querySelector<HTMLButtonElement>('#copyXml')!
     const refreshMapData = els.details.querySelector<HTMLButtonElement>('#refreshMapData')!
     const mapPreviewBtn = els.details.querySelector<HTMLButtonElement>('#mapPreviewBtn')!
+    const attachReviewImage = els.details.querySelector<HTMLButtonElement>('#attachReviewImage')!
+    const removeReviewImage = els.details.querySelector<HTMLButtonElement>('#removeReviewImage')!
+    const reviewImageFile = els.details.querySelector<HTMLInputElement>('#reviewImageFile')!
 
     const updateReviewCounter = (value: string) => {
       if (!reviewCounter) return
       reviewCounter.textContent = `${value.length} / ${REVIEW_MAX_CHARS}`
+    }
+
+    const persistReviewValue = (value: string) => {
+      let next = value
+      if (next.length > REVIEW_MAX_CHARS) {
+        next = next.slice(0, REVIEW_MAX_CHARS)
+        reviewInput.value = next
+      }
+      updateReviewCounter(next)
+      if (reviewSaveTimer) {
+        window.clearTimeout(reviewSaveTimer)
+        reviewSaveTimer = null
+      }
+      reviewSaveTimer = window.setTimeout(() => {
+        reviewSaveTimer = null
+        updateSelected((item) => {
+          item.review = next
+        })
+      }, 200)
+    }
+
+    const emojiPicker = els.details.querySelector<HTMLDivElement>('#reviewEmojiPicker')
+    const emojiToggle = els.details.querySelector<HTMLButtonElement>('#reviewEmojiToggle')
+
+    for (const btn of Array.from(els.details.querySelectorAll<HTMLButtonElement>('.reviewFmtBtn[data-fmt]'))) {
+      btn.addEventListener('mousedown', (ev) => {
+        // keep textarea selection when clicking toolbar
+        ev.preventDefault()
+      })
+      btn.addEventListener('click', () => {
+        const kind = btn.dataset.fmt as DiscordWrapKind
+        if (!kind) return
+        const result = wrapDiscordMarkdown(
+          reviewInput.value,
+          reviewInput.selectionStart,
+          reviewInput.selectionEnd,
+          kind,
+          REVIEW_MAX_CHARS,
+        )
+        applyToTextarea(reviewInput, result)
+        persistReviewValue(result.value)
+      })
+    }
+
+    emojiToggle?.addEventListener('mousedown', (ev) => ev.preventDefault())
+    emojiToggle?.addEventListener('click', () => {
+      if (!emojiPicker) return
+      const open = emojiPicker.hasAttribute('hidden')
+      if (open) emojiPicker.removeAttribute('hidden')
+      else emojiPicker.setAttribute('hidden', '')
+      emojiToggle.classList.toggle('active', open)
+    })
+
+    if (emojiPicker) {
+      for (const btn of Array.from(emojiPicker.querySelectorAll<HTMLButtonElement>('.emojiBtn'))) {
+        btn.addEventListener('mousedown', (ev) => ev.preventDefault())
+        btn.addEventListener('click', () => {
+          const raw = btn.dataset.insert ?? ''
+          const insert = decodeURIComponent(raw)
+          if (!insert) return
+          const result = insertAtSelection(
+            reviewInput.value,
+            reviewInput.selectionStart,
+            reviewInput.selectionEnd,
+            insert,
+            REVIEW_MAX_CHARS,
+          )
+          applyToTextarea(reviewInput, result)
+          persistReviewValue(result.value)
+        })
+      }
     }
 
     copyXml.addEventListener('click', async () => {
@@ -2878,6 +3011,39 @@ export function initApp(root: HTMLElement): void {
       }
     })
 
+    attachReviewImage.addEventListener('click', () => {
+      reviewImageFile.value = ''
+      reviewImageFile.click()
+    })
+
+    reviewImageFile.addEventListener('change', async () => {
+      const file = reviewImageFile.files?.[0]
+      if (!file) return
+      try {
+        const image = await readFileAsReviewImage(file)
+        updateSelected((item) => {
+          item.reviewImage = image
+        })
+        detailsBoundId = null
+        renderDetails()
+        setStatus(`Image attached: ${image.filename}`)
+      } catch (e) {
+        showToast(String(e), 'error')
+        setStatus(`Failed to attach image: ${String(e)}`)
+      } finally {
+        reviewImageFile.value = ''
+      }
+    })
+
+    removeReviewImage.addEventListener('click', () => {
+      updateSelected((item) => {
+        item.reviewImage = null
+      })
+      detailsBoundId = null
+      renderDetails()
+      setStatus('Review image removed.')
+    })
+
     decisionSelect.addEventListener('change', () => {
       const raw = decisionSelect.value
       const d = raw ? (raw as NonNullable<QueueItem['decision']>) : null
@@ -2891,22 +3057,7 @@ export function initApp(root: HTMLElement): void {
     })
 
     reviewInput.addEventListener('input', () => {
-      let value = reviewInput.value
-      if (value.length > REVIEW_MAX_CHARS) {
-        value = value.slice(0, REVIEW_MAX_CHARS)
-        reviewInput.value = value
-      }
-      updateReviewCounter(value)
-      if (reviewSaveTimer) {
-        window.clearTimeout(reviewSaveTimer)
-        reviewSaveTimer = null
-      }
-      reviewSaveTimer = window.setTimeout(() => {
-        reviewSaveTimer = null
-        updateSelected((item) => {
-          item.review = value
-        })
-      }, 200)
+      persistReviewValue(reviewInput.value)
     })
 
     // inicializa valores
@@ -3428,7 +3579,13 @@ function normalizeHotkeyDisplay(value: string): string {
                   importedIgnored: typeof it.importedIgnored === 'boolean' ? it.importedIgnored : null,
                   importedReason: it.importedReason ?? null,
                   commandsUsed: Array.isArray(it.commandsUsed) ? it.commandsUsed : [],
-                  review: typeof it.review === 'string' ? it.review : '',
+                  review:
+                    typeof it.review === 'string'
+                      ? it.review
+                      : typeof it.comment === 'string'
+                        ? it.comment
+                        : '',
+                  reviewImage: parseReviewImageFromItemFields(it as Record<string, unknown>),
                   decision: (it.decision as any) ?? null,
                   status: (it.status as any) ?? 'pending',
                   createdAt: typeof it.createdAt === 'string' ? it.createdAt : nowIso(),

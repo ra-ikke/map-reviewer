@@ -743,6 +743,135 @@ body.session-active #inputPanel {
   flex-wrap: wrap;
 }
 
+.reviewEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgb(var(--panel2-rgb) / 0.35);
+}
+
+.reviewToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: rgb(var(--panel-rgb) / 0.55);
+}
+
+.reviewFmtBtn {
+  min-width: 30px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.reviewFmtBtn:hover,
+.reviewFmtBtn.active {
+  background: rgb(var(--primary-rgb) / 0.18);
+  border-color: rgb(var(--primary-rgb) / 0.35);
+}
+
+.reviewToolbarSep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+.reviewTextarea {
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.emojiPicker {
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  background: rgb(var(--panel-rgb) / 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.emojiPicker[hidden] {
+  display: none !important;
+}
+
+.emojiGroupTitle {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.emojiGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
+  gap: 4px;
+}
+
+.emojiBtn {
+  width: 100%;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.emojiBtn:hover {
+  background: rgb(var(--primary-rgb) / 0.16);
+  border-color: rgb(var(--primary-rgb) / 0.3);
+}
+
+.emojiBtn img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.reviewAttachment {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.reviewAttachmentPreview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reviewAttachmentPreview img {
+  max-width: min(280px, 100%);
+  max-height: 160px;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgb(var(--panel2-rgb) / 0.45);
+}
+
 @media (max-width: 1100px) {
   .main {
     grid-template-columns: 1fr;
