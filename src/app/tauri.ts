@@ -329,13 +329,43 @@ export interface UpdateAvailable {
 export async function checkForUpdate(): Promise<UpdateAvailable | null> {
   const upd = await check()
   if (!upd || !upd.available) return null
+  let body = (upd.body ?? null) as string | null
+  // Tauri updater reads notes from latest.json. If that field was empty
+  // (common when CI didn't pass releaseBody to tauri-action), fall back to
+  // the GitHub Release body which usually has the What's New text.
+  if (!String(body ?? '').trim()) {
+    body = await fetchGithubReleaseNotes(String(upd.version))
+  }
   return {
     available: true,
     version: String(upd.version),
     date: (upd.date ?? null) as any,
-    body: (upd.body ?? null) as any,
+    body,
     raw: upd,
   }
+}
+
+async function fetchGithubReleaseNotes(version: string): Promise<string | null> {
+  const tag = String(version || '').trim().replace(/^v/i, '')
+  if (!tag) return null
+  const urls = [
+    `https://api.github.com/repos/ra-ikke/map-reviewer/releases/tags/${encodeURIComponent(tag)}`,
+    `https://api.github.com/repos/ra-ikke/map-reviewer/releases/tags/${encodeURIComponent(`v${tag}`)}`,
+  ]
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: 'application/vnd.github+json' },
+      })
+      if (!res.ok) continue
+      const data = (await res.json()) as { body?: string | null }
+      const notes = String(data?.body ?? '').trim()
+      if (notes) return notes
+    } catch {
+      // best effort
+    }
+  }
+  return null
 }
 
 export async function downloadAndInstallUpdate(update: UpdateAvailable, onEvent?: (ev: UpdaterDownloadEvent) => void): Promise<void> {

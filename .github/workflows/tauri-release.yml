@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.release.outputs.id }}
+      notes_body: ${{ steps.notes.outputs.body }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,12 +36,15 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           TAG_FILE=".github/releases/${TAG}.md"
           FALLBACK_FILE=".github/releases/latest.md"
+          NOTES_FILE=""
 
           if [ -f "${TAG_FILE}" ]; then
+            NOTES_FILE="${TAG_FILE}"
             echo "use_custom=true" >> "$GITHUB_OUTPUT"
             echo "body_path=${TAG_FILE}" >> "$GITHUB_OUTPUT"
             echo "Using custom release notes: ${TAG_FILE}"
           elif [ -f "${FALLBACK_FILE}" ]; then
+            NOTES_FILE="${FALLBACK_FILE}"
             echo "use_custom=true" >> "$GITHUB_OUTPUT"
             echo "body_path=${FALLBACK_FILE}" >> "$GITHUB_OUTPUT"
             echo "Using fallback release notes: ${FALLBACK_FILE}"
@@ -49,6 +53,15 @@ jobs:
             echo "body_path=" >> "$GITHUB_OUTPUT"
             echo "No custom release notes file found; using auto-generated notes."
           fi
+
+          # Multiline body for tauri-action `releaseBody` (fills latest.json `notes`)
+          {
+            echo "body<<EOF"
+            if [ -n "${NOTES_FILE}" ]; then
+              cat "${NOTES_FILE}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release (draft)
         id: release
@@ -112,6 +125,8 @@ jobs:
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           releaseDraft: true
+          # Critical: tauri-action writes latest.json `notes` from releaseBody (not GitHub release body)
+          releaseBody: ${{ needs.create-release.outputs.notes_body }}
           args: --config src-tauri/tauri.updater.conf.json
 
   publish-release:
@@ -130,3 +145,8 @@ jobs:
           RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
         run: node scripts/publish-release.mjs
 
+      - name: Sync updater notes into latest.json
+        env:
+          PAT: ${{ secrets.RELEASE_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: node scripts/sync-updater-notes.mjs
